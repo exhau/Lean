@@ -1,6 +1,6 @@
 {
     // algorithm selector
-    "algorithm-type-name": "BasicTemplateAlgorithm",
+    "algorithm-type-name": "AmigoTestAlgo",
 
     // engine
     "local": "true",
