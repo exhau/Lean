@@ -1,6 +1,6 @@
 {
     // algorithm selector
-    "algorithm-type-name": "AmigoTestAlgo",
+    "algorithm-type-name": "SPArbitrageDaily",
 
     // engine
     "local": "true",
