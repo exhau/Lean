@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using QuantConnect.Logging;
@@ -29,9 +30,6 @@ namespace QuantConnect.Data.Market
         // scale factor used in QC equity/forex data files
         private const decimal _scaleFactor = 10000m;
 
-        /******************************************************** 
-        * CLASS VARIABLES
-        *********************************************************/
         /// <summary>
         /// Volume:
         /// </summary>
@@ -84,9 +82,6 @@ namespace QuantConnect.Data.Market
         //In Base Class: DateTime Of this TradeBar
         //public DateTime Time;
 
-        /******************************************************** 
-        * CLASS CONSTRUCTORS
-        *********************************************************/
         /// <summary>
         /// Default initializer to setup an empty tradebar.
         /// </summary>
@@ -146,9 +141,6 @@ namespace QuantConnect.Data.Market
             Period = period ?? TimeSpan.FromMinutes(1);
         }
 
-        /******************************************************** 
-        * CLASS METHODS
-        *********************************************************/
         /// <summary>
         /// TradeBar Reader: Fetch the data from the QC storage and feed it line by line into the engine.
         /// </summary>
@@ -230,7 +222,7 @@ namespace QuantConnect.Data.Market
             if (config.Resolution == Resolution.Daily || config.Resolution == Resolution.Hour)
             {
                 // hourly and daily have different time format, and can use slow, robust c# parser.
-                tradeBar.Time = DateTime.ParseExact(csv[0], "yyyyMMdd HH:mm", CultureInfo.InvariantCulture);
+                tradeBar.Time = DateTime.ParseExact(csv[0], DateFormat.TwelveCharacter, CultureInfo.InvariantCulture);
                 tradeBar.Open = config.GetNormalizedPrice(Convert.ToDecimal(csv[1]) / _scaleFactor);
                 tradeBar.High = config.GetNormalizedPrice(Convert.ToDecimal(csv[2]) / _scaleFactor);
                 tradeBar.Low = config.GetNormalizedPrice(Convert.ToDecimal(csv[3]) / _scaleFactor);
@@ -270,7 +262,7 @@ namespace QuantConnect.Data.Market
             if (config.Resolution == Resolution.Daily || config.Resolution == Resolution.Hour)
             {
                 // hourly and daily have different time format, and can use slow, robust c# parser.
-                tradeBar.Time = DateTime.ParseExact(csv[0], "yyyyMMdd HH:mm", CultureInfo.InvariantCulture);
+                tradeBar.Time = DateTime.ParseExact(csv[0], DateFormat.TwelveCharacter, CultureInfo.InvariantCulture);
                 tradeBar.Open = Convert.ToDecimal(csv[1]) / _scaleFactor;
                 tradeBar.High = Convert.ToDecimal(csv[2]) / _scaleFactor;
                 tradeBar.Low = Convert.ToDecimal(csv[3]) / _scaleFactor;
@@ -279,7 +271,7 @@ namespace QuantConnect.Data.Market
             else
             {
                 //Fast decimal conversion
-                tradeBar.Time = DateTime.ParseExact(csv[0], "yyyyMMdd HH:mm:ss.ffff", CultureInfo.InvariantCulture);
+                tradeBar.Time = DateTime.ParseExact(csv[0], DateFormat.Forex, CultureInfo.InvariantCulture);
                 tradeBar.Open = csv[1].ToDecimal();
                 tradeBar.High = csv[2].ToDecimal();
                 tradeBar.Low = csv[3].ToDecimal();
@@ -334,10 +326,14 @@ namespace QuantConnect.Data.Market
                 dateFormat = "yyMMdd";
             }
 
+            string source;
             var securityTypePath = config.SecurityType.ToString().ToLower();
             var resolutionPath = config.Resolution.ToString().ToLower();
             var symbolPath = (string.IsNullOrEmpty(config.MappedSymbol) ? config.Symbol : config.MappedSymbol).ToLower();
+            var countryCode = config.Country.ToString().ToLower();
+            var liquiditySource = config.LiquditySource.ToString().ToLower();
             var filename = date.ToString(dateFormat) + "_" + dataType.ToString().ToLower() + ".zip";
+
 
             if (config.Resolution == Resolution.Hour || config.Resolution == Resolution.Daily)
             {
@@ -346,8 +342,23 @@ namespace QuantConnect.Data.Market
                 symbolPath = string.Empty;
             }
 
-            var source = Path.Combine(Constants.DataFolder, securityTypePath, resolutionPath, symbolPath, filename);
+            if (config.Country == CountryCode.None)
+            {
+                //No country are international or brokerage specific liquidity providers with certain spreads.
+                source = Path.Combine(Constants.DataFolder, securityTypePath, liquiditySource, resolutionPath, symbolPath, filename);
+            }
+            else
+            {
+                source = Path.Combine(Constants.DataFolder, securityTypePath, countryCode, resolutionPath, symbolPath, filename);
+            }
+
             return new SubscriptionDataSource(source, SubscriptionTransportMedium.LocalFile);
         }
+
+        public override BaseData Clone()
+        {
+            return (BaseData)MemberwiseClone();
+        }
+
     } // End Trade Bar Class
 }

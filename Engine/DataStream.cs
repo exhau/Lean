@@ -17,7 +17,6 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Diagnostics;
 using System.Linq;
 using QuantConnect.Data;
 using QuantConnect.Lean.Engine.DataFeeds;
@@ -25,33 +24,20 @@ using QuantConnect.Logging;
 
 namespace QuantConnect.Lean.Engine
 {
-    /******************************************************** 
-    * QUANTCONNECT NAMESPACES
-    *********************************************************/
     /// <summary>
     /// Data stream class takes a datafeed hander and converts it into a synchronized enumerable data format for looping 
     /// in the primary algorithm thread.
     /// </summary>
     public static class DataStream
     {
-        /******************************************************** 
-        * CLASS VARIABLES
-        *********************************************************/
         //Count of bridges and subscriptions.
         private static int _subscriptions;
-
-        /******************************************************** 
-        * CLASS PROPERTIES
-        *********************************************************/
 
         /// <summary>
         /// The frontier time of the data stream
         /// </summary>
         public static DateTime AlgorithmTime { get; private set; }
 
-        /******************************************************** 
-        * CLASS METHODS
-        *********************************************************/
         /// <summary>
         /// Process over the datafeed cross thread bridges to generate an enumerable sorted collection of the data, ready for a consumer
         /// to use and already synchronized in time.
@@ -101,13 +87,15 @@ namespace QuantConnect.Lean.Engine
                             // if there's no item skip to the next subscription
                             break;
                         }
-                        if (result.Count > 0 && result[0].EndTime > frontier)
+
+                        DateTime endTime = result[0].EndTime;
+                        if (result.Count > 0 && endTime > frontier)
                         {
                             // we have at least one item, check to see if its in ahead of the frontier,
                             // if so, keep track of how many ticks in the future it is
-                            if (earlyBirdTicks == 0 || earlyBirdTicks > result[0].EndTime.Ticks)
+                            if (earlyBirdTicks == 0 || earlyBirdTicks > endTime.Ticks)
                             {
-                                earlyBirdTicks = result[0].EndTime.Ticks;
+                                earlyBirdTicks = endTime.Ticks;
                             }
                             break;
                         }
@@ -115,9 +103,9 @@ namespace QuantConnect.Lean.Engine
                         {
                             // we have at least one item, check to see if its in ahead of the frontier,
                             // if so, keep track of how many ticks in the future it is
-                            if (earlyBirdTicks == 0 || earlyBirdTicks > result[0].EndTime.Ticks)
+                            if (earlyBirdTicks == 0 || earlyBirdTicks > endTime.Ticks)
                             {
-                                earlyBirdTicks = result[0].EndTime.Ticks;
+                                earlyBirdTicks = endTime.Ticks;
                             }
                         }
 
@@ -223,7 +211,6 @@ namespace QuantConnect.Lean.Engine
                 Thread.Sleep(1);
             }
         }
-
 
         /// <summary>
         /// Check if all the bridges have data or are dead before starting the analysis

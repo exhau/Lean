@@ -15,6 +15,7 @@
 
 using System;
 using System.Globalization;
+using System.IO;
 using QuantConnect.Logging;
 
 namespace QuantConnect.Data.Market
@@ -25,9 +26,6 @@ namespace QuantConnect.Data.Market
     /// </summary>
     public class Tick : BaseData
     {
-        /******************************************************** 
-        * CLASS VARIABLES
-        *********************************************************/
         /// <summary>
         /// Type of the Tick: Trade or Quote.
         /// </summary>
@@ -85,9 +83,6 @@ namespace QuantConnect.Data.Market
         //In Base Class: DateTime Of this TradeBar
         //public DateTime Time;
 
-        /******************************************************** 
-        * CLASS CONSTRUCTORS
-        *********************************************************/
         /// <summary>
         /// Initialize tick class with a default constructor.
         /// </summary>
@@ -170,7 +165,7 @@ namespace QuantConnect.Data.Market
             var csv = line.Split(',');
             DataType = MarketDataType.Tick;
             Symbol = symbol;
-            Time = DateTime.ParseExact(csv[0], "yyyyMMdd HH:mm:ss.ffff", CultureInfo.InvariantCulture);
+            Time = DateTime.ParseExact(csv[0], DateFormat.Forex, CultureInfo.InvariantCulture);
             Value = BidPrice + (AskPrice - BidPrice) / 2;
             TickType = TickType.Quote;
             BidPrice = Convert.ToDecimal(csv[1], CultureInfo.InvariantCulture);
@@ -231,7 +226,7 @@ namespace QuantConnect.Data.Market
                     case SecurityType.Forex:
                         Symbol = config.Symbol;
                         TickType = TickType.Quote;
-                        Time = DateTime.ParseExact(csv[0], "yyyyMMdd HH:mm:ss.ffff", CultureInfo.InvariantCulture);
+                        Time = DateTime.ParseExact(csv[0], DateFormat.Forex, CultureInfo.InvariantCulture);
                         BidPrice = csv[1].ToDecimal();
                         AskPrice = csv[2].ToDecimal();
                         Value = BidPrice + (AskPrice - BidPrice) / 2;
@@ -244,9 +239,6 @@ namespace QuantConnect.Data.Market
             }
         }
 
-        /******************************************************** 
-        * CLASS METHODS
-        *********************************************************/
         /// <summary>
         /// Tick implementation of reader method: read a line of data from the source and convert it to a tick object.
         /// </summary>
@@ -279,7 +271,7 @@ namespace QuantConnect.Data.Market
 
             if (isLiveMode)
             {
-                // currently ticks aren't sourced through GetSource in live mode
+                // Currently ticks aren't sourced through GetSource in live mode
                 return new SubscriptionDataSource(string.Empty, SubscriptionTransportMedium.LocalFile);
             }
 
@@ -289,10 +281,31 @@ namespace QuantConnect.Data.Market
                 dataType = TickType.Quote;
                 dateFormat = "yyMMdd";
             }
-            var symbol = string.IsNullOrEmpty(config.MappedSymbol) ? config.Symbol : config.MappedSymbol; 
-            var source = Constants.DataFolder + config.SecurityType.ToString().ToLower();
-            source += @"/" + config.Resolution.ToString().ToLower() + @"/" + symbol.ToLower() + @"/";
-            source += date.ToString(dateFormat) + "_" + dataType.ToString().ToLower() + ".zip";
+
+            string source;
+            var symbol = string.IsNullOrEmpty(config.MappedSymbol) ? config.Symbol : config.MappedSymbol;
+            var securityType = config.SecurityType.ToString().ToLower();
+            var countryCode = config.Country.ToString().ToLower();
+            var resolution = config.Resolution.ToString().ToLower();
+            var file = date.ToString(dateFormat) + "_" + dataType.ToString().ToLower() + ".zip";
+
+            if (config.SecurityType == SecurityType.Equity)
+            {
+                //Add in the country code for equities for internationalization support.
+                source = Path.Combine(Constants.DataFolder, securityType, countryCode, resolution, symbol.ToLower(), file);
+            }
+            else if (config.SecurityType == SecurityType.Forex || config.SecurityType == SecurityType.Cfd)
+            {
+                //FX, CFD's are brokerage/liquidity provider specific (eg. different brokerages have different spreads). 
+                var dataSource = config.LiquditySource.ToString().ToLower();
+                source = Path.Combine(Constants.DataFolder, securityType, dataSource, resolution, symbol.ToLower(), file);
+            }
+            else
+            {
+                //All other asset types default here
+                source = Path.Combine(Constants.DataFolder, securityType, resolution, symbol.ToLower(), file);
+            }
+
             return new SubscriptionDataSource(source, SubscriptionTransportMedium.LocalFile);
         }
 

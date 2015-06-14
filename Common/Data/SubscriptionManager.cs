@@ -21,27 +21,14 @@ using QuantConnect.Data.Market;
 
 namespace QuantConnect.Data
 {
-    /******************************************************** 
-    * CLASS DEFINITIONS
-    *********************************************************/
     /// <summary>
     /// Enumerable Subscription Management Class
     /// </summary>
     public class SubscriptionManager
     {
-        /******************************************************** 
-        * PUBLIC VARIABLES
-        *********************************************************/
         /// Generic Market Data Requested and Object[] Arguements to Get it:
         public List<SubscriptionDataConfig> Subscriptions;
 
-        /******************************************************** 
-        * PRIVATE VARIABLES
-        *********************************************************/
-        
-        /******************************************************** 
-        * CLASS CONSTRUCTOR
-        *********************************************************/
         /// <summary>
         /// Initialise the Generic Data Manager Class
         /// </summary>
@@ -51,9 +38,6 @@ namespace QuantConnect.Data
             Subscriptions = new List<SubscriptionDataConfig>();
         }
 
-        /******************************************************** 
-        * CLASS PROPERTIES
-        *********************************************************/
         /// <summary>
         /// Get the count of assets:
         /// </summary>
@@ -65,9 +49,6 @@ namespace QuantConnect.Data
             }
         }
 
-        /******************************************************** 
-        * CLASS METHODS
-        *********************************************************/
         /// <summary>
         /// Add Market Data Required (Overloaded method for backwards compatibility).
         /// </summary>
@@ -87,7 +68,6 @@ namespace QuantConnect.Data
             return Add(dataType, security, symbol, resolution, fillDataForward, extendedMarketHours, true, true);
         }
 
-
         /// <summary>
         /// Add Market Data Required - generic data typing support as long as Type implements IBaseData.
         /// </summary>
@@ -106,6 +86,21 @@ namespace QuantConnect.Data
             symbol = symbol.ToUpper();
             //Create:
             var newConfig = new SubscriptionDataConfig(dataType, security, symbol, resolution, fillDataForward, extendedMarketHours, isTradeBar, hasVolume, isInternalFeed, Subscriptions.Count);
+
+            //For now choose the liquidity and country codes based on our current data providers.
+            // This gives us room to grow to international markets and other brokerage providers.
+            switch (security)
+            {
+                case SecurityType.Forex:
+                    //Currently QC FX data source is FXCM pricing.
+                    newConfig.LiquditySource = LiquiditityProviderDataSource.FXCM;
+                    break;
+                case SecurityType.Equity:
+                    //Currently QC Equities are US Only.
+                    newConfig.Country = CountryCode.USA;
+                    break;
+            }
+
             //Add to subscription list: make sure we don't have his symbol:
             Subscriptions.Add(newConfig);
 
@@ -141,19 +136,6 @@ namespace QuantConnect.Data
 
             //If we made it here it is because we never found the symbol in the subscription list
             throw new ArgumentException("Please subscribe to this symbol before adding a consolidator for it. Symbol: " + symbol);
-        }
-
-
-        /// <summary>
-        /// Get the settings object for this ticker:
-        /// </summary>
-        /// <param name="symbol">Symbol we're searching for in the subscriptions list</param>
-        /// <returns>SubscriptionDataConfig Configuration Object</returns>
-        private SubscriptionDataConfig GetSetting(string symbol)
-        {
-            return (from config in Subscriptions 
-                    where config.Symbol == symbol.ToUpper() 
-                    select config).SingleOrDefault();
         }
 
     } // End Algorithm MetaData Manager Class

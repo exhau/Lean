@@ -1,4 +1,4 @@
-/*
+﻿/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  * 
@@ -17,9 +17,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
-using System.ComponentModel.Composition.Hosting;
 using System.Diagnostics;
-using System.Globalization;
 using System.Threading;
 using QuantConnect.Brokerages.Backtesting;
 using QuantConnect.Configuration;
@@ -36,9 +34,6 @@ using QuantConnect.Util;
 
 namespace QuantConnect.Lean.Engine 
 {
-    /******************************************************** 
-    * CLASS DEFINITIONS
-    *********************************************************/
     /// <summary>
     /// LEAN ALGORITHMIC TRADING ENGINE: ENTRY POINT.
     /// 
@@ -47,17 +42,11 @@ namespace QuantConnect.Lean.Engine
     /// </summary>
     public class Engine 
     {
-        /******************************************************** 
-        * CLASS PRIVATE VARIABLES
-        *********************************************************/
         private static bool _liveMode = Config.GetBool("live-mode");
         private static bool _local = Config.GetBool("local");
         private static IBrokerage _brokerage;
         private const string _collapseMessage = "Unhandled exception breaking past controls and causing collapse of algorithm node. This is likely a memory leak of an external dependency or the underlying OS terminating the LEAN engine.";
 
-        /******************************************************** 
-        * CLASS PUBLIC VARIABLES
-        *********************************************************/
         /// <summary>
         /// Datafeed handler creates local, live, historical data feed management all through specific dedicated DLL's.
         /// </summary>
@@ -110,9 +99,6 @@ namespace QuantConnect.Lean.Engine
         /// </summary>
         public static IApi Api;
 
-        /******************************************************** 
-        * CLASS PROPERTIES
-        *********************************************************/
         /// <summary>
         /// Are we operating this as a local independent node, independent of the cloud.
         /// Running on a local algorithm, and local datasources.
@@ -144,25 +130,19 @@ namespace QuantConnect.Lean.Engine
         {
             get
             {
-                //Total Physical Ram Available:
-                var allocation = 3072;
+                //Total Physical Ram Available: 4gb max allocation per backtest
+                var allocation = 4096;
                 var ram = Convert.ToInt32(OS.TotalPhysicalMemory);
-                
                 if (ram < allocation)
                 {
                     //If memory on machine less 100 allocation for OS: 
                     allocation = ram - 100;
                 }
-
                 Log.Trace("Engine.MaximumRamAllocation(): Allocated: " + allocation);
-
                 return allocation;
             }
         }
 
-        /******************************************************** 
-        * CLASS METHODS
-        *********************************************************/
         /// <summary>
         /// Primary Analysis Thread:
         /// </summary>
@@ -316,8 +296,11 @@ namespace QuantConnect.Lean.Engine
 
                     try
                     {
+                        //Create a new engine isolator class 
+                        var isolator = new Isolator();
+
                         // Execute the Algorithm Code:
-                        var complete = Isolator.ExecuteWithTimeLimit(SetupHandler.MaximumRuntime, AlgorithmManager.TimeLoopWithinLimits, () =>
+                        var complete = isolator.ExecuteWithTimeLimit(SetupHandler.MaximumRuntime, AlgorithmManager.TimeLoopWithinLimits, () =>
                         {
                             try
                             {
@@ -325,7 +308,7 @@ namespace QuantConnect.Lean.Engine
                                 // -> Using this Data Feed, 
                                 // -> Send Orders to this TransactionHandler, 
                                 // -> Send Results to ResultHandler.
-                                AlgorithmManager.Run(job, algorithm, DataFeed, TransactionHandler, ResultHandler, SetupHandler, RealTimeHandler);
+                                AlgorithmManager.Run(job, algorithm, DataFeed, TransactionHandler, ResultHandler, SetupHandler, RealTimeHandler, isolator.CancelToken);
                             }
                             catch (Exception err)
                             {
@@ -335,7 +318,7 @@ namespace QuantConnect.Lean.Engine
 
                             Log.Trace("Engine.Run(): Exiting Algorithm Manager");
 
-                            }, job.UserPlan == UserPlan.Free ? 1024 : MaximumRamAllocation);
+                        }, job.UserPlan == UserPlan.Free ? Math.Min(1024, MaximumRamAllocation) : MaximumRamAllocation);
 
                         if (!complete)
                         {
@@ -477,8 +460,6 @@ namespace QuantConnect.Lean.Engine
             }
             Log.LogHandler.Dispose();
         }
-
-
 
         /// <summary>
         /// Get an instance of the data feed handler we're requesting for this work.
