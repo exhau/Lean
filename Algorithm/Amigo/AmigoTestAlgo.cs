@@ -15,7 +15,7 @@ namespace QuantConnect.Algorithm.Amigo
             SetEndDate(2013, 10, 11);    //Set End Date
             SetCash(100000);             //Set Strategy Cash
             // Find more symbols here: http://quantconnect.com/data
-            AddSecurity(SecurityType.Equity, "SPY", Resolution.Second);
+            AddSecurity(SecurityType.Equity, "SPY", Resolution.Minute);
         }
 
         /// <summary>
