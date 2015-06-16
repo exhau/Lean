@@ -248,7 +248,7 @@ namespace QuantConnect.Lean.Engine
                         var errorMessage = String.Join(",", algorithm.ErrorMessages);
                         errorMessage += String.Join(",", SetupHandler.Errors);
                         ResultHandler.RuntimeError(errorMessage);
-                        Api.SetAlgorithmStatus(job.AlgorithmId, AlgorithmStatus.RuntimeError);
+                        Api.SetAlgorithmStatus(job.AlgorithmId, AlgorithmStatus.RuntimeError, errorMessage);
                     }
                 }
                 catch (Exception err)
@@ -308,7 +308,7 @@ namespace QuantConnect.Lean.Engine
                                 // -> Using this Data Feed, 
                                 // -> Send Orders to this TransactionHandler, 
                                 // -> Send Results to ResultHandler.
-                                AlgorithmManager.Run(job, algorithm, DataFeed, TransactionHandler, ResultHandler, SetupHandler, RealTimeHandler, isolator.CancelToken);
+                                AlgorithmManager.Run(job, algorithm, DataFeed, TransactionHandler, ResultHandler, SetupHandler, RealTimeHandler, isolator.CancellationToken);
                             }
                             catch (Exception err)
                             {
