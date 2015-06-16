@@ -13,7 +13,7 @@ namespace QuantConnect.Algorithm.Amigo
     {
         const string _indexFuture = "CHRIS/CME_ES2";
         const string _index = "SPY";
-        const int  _multiplier = 100;
+        const int  _multiplier = 10;
 
         int _unit = 10;
 
