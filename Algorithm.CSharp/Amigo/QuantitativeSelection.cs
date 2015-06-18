@@ -4,16 +4,14 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
+using QuantConnect.Data.Custom;
 using QuantConnect.Indicators;
-using QuantConnect.Data.Market;
-//using QuantConnect.Models;
-
 
 namespace QuantConnect.Algorithm.Amigo
 {
     public class QCUMovingAverageCross : QCAlgorithm
     {
-        private const string Symbol = "SPY";
+        private const string Symbol = "YAHOO/INDEX_SPY";
 
         private ExponentialMovingAverage fast;
         private ExponentialMovingAverage slow;
@@ -23,16 +21,17 @@ namespace QuantConnect.Algorithm.Amigo
         public override void Initialize()
         {
             // set up our analysis span
-            SetStartDate(2009, 01, 01);
+            SetStartDate(2011, 01, 01);
             SetEndDate(2015, 06, 10);
+            SetCash(50000000);
 
             // request SPY data with minute resolution
-            AddSecurity(SecurityType.Equity, Symbol, Resolution.Minute);
+            AddData<Quandl>(Symbol, Resolution.Daily, true, true);
 
             // create a 15 day exponential moving average
             fast = EMA(Symbol, 15, Resolution.Daily);
             // create a 12 26 9 MACD
-            macd = MACD(Symbol, 12, 26, 9, MovingAverageType.Exponential, Resolution.Minute);
+            macd = MACD(Symbol, 12, 26, 9, MovingAverageType.Simple, Resolution.Daily);
             // create a 30 day exponential moving average
             slow = EMA(Symbol, 30, Resolution.Daily);
 
@@ -47,12 +46,12 @@ namespace QuantConnect.Algorithm.Amigo
 
             for (int i = 0; i < ribbonCount; i++)
             {
-                ribbon[i] = SMA(Symbol, (i + 1) * ribbonInterval, Resolution.Hour); // 5-day SMA, 10-day SMA, 15-day SMA....
+                ribbon[i] = SMA(Symbol, (i + 1) * ribbonInterval, Resolution.Daily); // 5-day SMA, 10-day SMA, 15-day SMA....
             }
         }
 
         private DateTime previous;
-        public void OnData(TradeBars data)
+        public void OnData(Quandl data)
         {
             // a couple things to notice in this method:
             //  1. We never need to 'update' our indicators with the data, the engine takes care of this for us
@@ -73,7 +72,7 @@ namespace QuantConnect.Algorithm.Amigo
             if (holdings <= 0)
             {
                 // if the fast is greater than the slow, we'll go long
-                if (fast > slow * (1 + tolerance))
+                if (fast > slow * (1 + tolerance) && macd.Signal > (macd.Fast - macd.Slow))
                 {
                     Log("BUY  >> " + Securities[Symbol].Price);
                     SetHoldings(Symbol, 1.0);
@@ -88,11 +87,11 @@ namespace QuantConnect.Algorithm.Amigo
                 Liquidate(Symbol);
             }
 
-            Plot(Symbol, "Price", data[Symbol].Price);
-            Plot("Ribbon", "Price", data[Symbol].Price);
+            Plot(Symbol, "Price", data.Price);
+            Plot("Ribbon", "Price", data.Price);
 
             // easily plot indicators, the series name will be the name of the indicator
-            Plot(Symbol, fast, slow);
+            Plot(Symbol, fast, slow, macd.Signal, macd.Fast, macd.Slow);
             Plot("Ribbon", ribbon);
 
             previous = data.Time;

@@ -9,7 +9,7 @@
     "environment": "backtesting",
 
     // algorithm selector
-    "algorithm-type-name": "SPArbitrageDaily",
+    "algorithm-type-name": "QCUMovingAverageCross",
 
     // engine
     "local": true,
