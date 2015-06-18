@@ -110,7 +110,7 @@ namespace QuantConnect.Data
         /// <summary>
         /// The liquidity provider source for the data.
         /// </summary>
-        public LiquiditityProviderDataSource LiquditySource = LiquiditityProviderDataSource.NotApplicable;
+        public LiquidityProviderDataSource LiquiditySource = LiquidityProviderDataSource.NotApplicable;
 
         /// <summary>
         /// Consolidators that are registred with this subscription
@@ -198,7 +198,7 @@ namespace QuantConnect.Data
                     return price*PriceScaleFactor;
                 
                 case DataNormalizationMode.TotalReturn:
-                    return price + SumOfDividends;
+                    return (price*PriceScaleFactor) + SumOfDividends;
                 
                 default:
                     throw new ArgumentOutOfRangeException();

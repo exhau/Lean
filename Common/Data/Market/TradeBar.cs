@@ -104,8 +104,9 @@ namespace QuantConnect.Data.Market
         /// Return a new instance with the same values as this original.
         /// </summary>
         /// <param name="original">Original tradebar object we seek to clone</param>
-        public TradeBar(TradeBar original) 
+        public TradeBar(TradeBar original)
         {
+            DataType = MarketDataType.TradeBar;
             Time = new DateTime(original.Time.Ticks);
             Symbol = original.Symbol;
             Value = original.Close;
@@ -139,6 +140,7 @@ namespace QuantConnect.Data.Market
             Close = close;
             Volume = volume;
             Period = period ?? TimeSpan.FromMinutes(1);
+            DataType = MarketDataType.TradeBar;
         }
 
         /// <summary>
@@ -332,7 +334,7 @@ namespace QuantConnect.Data.Market
             var resolutionPath = config.Resolution.ToString().ToLower();
             var symbolPath = (string.IsNullOrEmpty(config.MappedSymbol) ? config.Symbol : config.MappedSymbol).ToLower();
             var countryCode = config.Country.ToString().ToLower();
-            var liquiditySource = config.LiquditySource.ToString().ToLower();
+            var liquiditySource = config.LiquiditySource.ToString().ToLower();
             var filename = date.ToString(dateFormat) + "_" + dataType.ToString().ToLower() + ".zip";
 
 

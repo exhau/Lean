@@ -219,13 +219,24 @@ namespace QuantConnect.Lean.Engine
                         job = null;
                     }
                 } while (job == null);
+
+                // log the job endpoints
+                var setupHandlerTypeName = Config.Get("setup-handler", "ConsoleSetupHandler");
+                var transactionHandlerTypeName = Config.Get("transaction-handler", "BacktestingTransactionHandler");
+                var realTimeHandlerTypeName = Config.Get("real-time-handler", "BacktestingRealTimeHandler");
+                var dataFeedHandlerTypeName = Config.Get("data-feed-handler", "FileSystemDataFeed");
+                Log.Trace("JOB HANDLERS: ");
+                Log.Trace("         Setup:        " + setupHandlerTypeName);
+                Log.Trace("         Transactions: " + transactionHandlerTypeName);
+                Log.Trace("         RealTime:     " + realTimeHandlerTypeName);
+                Log.Trace("         DataFeed:     " + dataFeedHandlerTypeName);
                     
 
                 //-> Initialize messaging system
                 Notify.SetChannel(job.Channel);
 
                 //-> Create SetupHandler to configure internal algorithm state:
-                SetupHandler = GetSetupHandler(job.SetupEndpoint);
+                SetupHandler = Composer.Instance.GetExportedValueByTypeName<ISetupHandler>(setupHandlerTypeName);
 
                 //-> Set the result handler type for this algorithm job, and launch the associated result thread.
                 ResultHandler = GetResultHandler(job);
@@ -271,9 +282,15 @@ namespace QuantConnect.Lean.Engine
 
                     //Load the associated handlers for data, transaction and realtime events:
                     ResultHandler.SetAlgorithm(algorithm);
-                    DataFeed = GetDataFeedHandler(algorithm, _brokerage, job);
-                    TransactionHandler  = GetTransactionHandler(algorithm, _brokerage, ResultHandler, job);
-                    RealTimeHandler     = GetRealTimeHandler(algorithm, _brokerage, DataFeed, ResultHandler, job);
+                    
+                    DataFeed = Composer.Instance.GetExportedValueByTypeName<IDataFeed>(dataFeedHandlerTypeName);
+                    DataFeed.Initialize(algorithm, job);
+                    
+                    TransactionHandler = Composer.Instance.GetExportedValueByTypeName<ITransactionHandler>(transactionHandlerTypeName);
+                    TransactionHandler.Initialize(algorithm, _brokerage);
+                    
+                    RealTimeHandler = Composer.Instance.GetExportedValueByTypeName<IRealTimeHandler>(realTimeHandlerTypeName);
+                    RealTimeHandler.Initialize(algorithm, job);
 
                     //Set the error handlers for the brokerage asynchronous errors.
                     SetupHandler.SetupErrorHandler(ResultHandler, _brokerage);
@@ -443,7 +460,7 @@ namespace QuantConnect.Lean.Engine
 
                 //Delete the message from the job queue:
                 JobQueue.AcknowledgeJob(job);
-                Log.Trace("Engine.Main(): Packet removed from queue: " + job.AlgorithmId);
+                if (job != null) Log.Trace("Engine.Main(): Packet removed from queue: " + job.AlgorithmId);
 
                 //Attempt to clean up ram usage:
                 GC.Collect();
@@ -461,101 +478,6 @@ namespace QuantConnect.Lean.Engine
             Log.LogHandler.Dispose();
         }
 
-        /// <summary>
-        /// Get an instance of the data feed handler we're requesting for this work.
-        /// </summary>
-        /// <param name="algorithm">User algorithm to scan for securities</param>
-        /// <param name="job">Algorithm Node Packet</param>
-        /// <returns>Class matching IDataFeed Interface</returns>
-        private static IDataFeed GetDataFeedHandler(IAlgorithm algorithm, IBrokerage brokerage, AlgorithmNodePacket job)
-        {
-            var df = default(IDataFeed);
-            switch (job.DataEndpoint) 
-            {
-                //default:
-                ////Backtesting:
-                case DataFeedEndpoint.Backtesting:
-                    df = new BacktestingDataFeed(algorithm, (BacktestNodePacket)job);
-                    Log.Trace("Engine.GetDataFeedHandler(): Selected Backtesting Datafeed");
-                    break;
-
-                case DataFeedEndpoint.Database:
-                    df = new DatabaseDataFeed(algorithm, (BacktestNodePacket)job);
-                    Log.Trace("Engine.GetDataFeedHandler(): Selected Database Datafeed");
-                    break;
-
-                //Operation from local files:
-                case DataFeedEndpoint.FileSystem:
-                    df = new FileSystemDataFeed(algorithm, (BacktestNodePacket)job);
-                    Log.Trace("Engine.GetDataFeedHandler(): Selected FileSystem Datafeed");
-                    break;
-
-                //Live Trading Data Source:
-                case DataFeedEndpoint.LiveTrading:
-
-                    var useBroker = Config.GetBool("use-broker-data-queue-handler", false);
-
-                    var ds = useBroker == true ?  
-                                brokerage as IDataQueueHandler:
-                                Composer.Instance.GetExportedValueByTypeName<IDataQueueHandler>(Config.Get("data-queue-handler", "LiveDataQueue"));
-
-                    df = new LiveTradingDataFeed(algorithm, (LiveNodePacket)job, ds);
-                    Log.Trace("Engine.GetDataFeedHandler(): Selected LiveTrading Datafeed");
-                    break;
-            }
-            return df;
-        }
-
-        /// <summary>
-        /// Select the realtime event handler set in the job.
-        /// </summary>
-        private static IRealTimeHandler GetRealTimeHandler(IAlgorithm algorithm, IBrokerage brokerage, IDataFeed feed, IResultHandler results, AlgorithmNodePacket job)
-        {
-            var rth = default(IRealTimeHandler);
-            switch (job.RealTimeEndpoint)
-            { 
-                //Don't fire based on system time but virtualized backtesting time.
-                case RealTimeEndpoint.Backtesting:
-                    Log.Trace("Engine.GetRealTimeHandler(): Selected Backtesting RealTimeEvent Handler");
-                    rth = new BacktestingRealTimeHandler(algorithm, job);
-                    break;
-
-                // Fire events based on real system clock time.
-                case RealTimeEndpoint.LiveTrading:
-                    Log.Trace("Engine.GetRealTimeHandler(): Selected LiveTrading RealTimeEvent Handler");
-                    rth = new LiveTradingRealTimeHandler(algorithm, feed, results);
-                    break;
-            }
-            return rth;
-        }
-
-
-        /// <summary>
-        /// Get an instance of the transaction handler set by the task.
-        /// </summary>
-        /// <param name="algorithm">Algorithm instance</param>
-        /// <param name="job">Algorithm job packet</param>
-        /// <param name="brokerage">Brokerage instance to avoid access token duplication</param>
-        /// <param name="results">Results array for sending order events.</param>
-        /// <returns>Class matching ITransactionHandler interface</returns>
-        private static ITransactionHandler GetTransactionHandler(IAlgorithm algorithm, IBrokerage brokerage, IResultHandler results, AlgorithmNodePacket job)
-        {
-            ITransactionHandler th;
-            switch (job.TransactionEndpoint)
-            {
-                case TransactionHandlerEndpoint.Brokerage:
-                    th = new BrokerageTransactionHandler(algorithm, brokerage);
-                    Log.Trace("Engine.GetTransactionHandler(): Selected Brokerage Transaction Models.");
-                    break;
-
-                //Operation from local files:
-                default:
-                    th = new BacktestingTransactionHandler(algorithm, brokerage as BacktestingBrokerage);
-                    Log.Trace("Engine.GetTransactionHandler(): Selected Backtesting Transaction Models.");
-                    break;
-            }
-            return th;
-        }
 
         /// <summary>
         /// Get an instance of the data feed handler we're requesting for this work.
@@ -570,36 +492,6 @@ namespace QuantConnect.Lean.Engine
             rh.Initialize(job);
             Log.Trace("Engine.GetResultHandler(): Loaded and Initialized Result Handler: " + resultHandler + "  v" + Constants.Version);
             return rh;
-        }
-
-
-        /// <summary>
-        /// Get the setup handler for this algorithm, depending on its use case.
-        /// </summary>
-        /// <param name="setupMethod">Setup handler</param>
-        /// <returns>Instance of a setup handler:</returns>
-        private static ISetupHandler GetSetupHandler(SetupHandlerEndpoint setupMethod)
-        {
-            var sh = default(ISetupHandler);
-
-            switch (setupMethod)
-            {
-                //Setup console handler:
-                case SetupHandlerEndpoint.Console:
-                    sh = new ConsoleSetupHandler();
-                    Log.Trace("Engine.GetSetupHandler(): Selected Console Algorithm Setup Handler.");
-                    break;
-                //Default, backtesting result handler:
-                case SetupHandlerEndpoint.Backtesting:
-                    sh = new BacktestingSetupHandler();
-                    Log.Trace("Engine.GetSetupHandler(): Selected Backtesting Algorithm Setup Handler.");
-                    break;
-                case SetupHandlerEndpoint.Brokerage:
-                    sh = new BrokerageSetupHandler();
-                    Log.Trace("Engine.GetSetupHandler(): Selected Brokerage Algorithm Setup Handler.");
-                    break;
-            }
-            return sh;
         }
     } // End Algorithm Node Core Thread
     

@@ -404,7 +404,7 @@ namespace QuantConnect
     /// <summary>
     /// Data source for data which is liquidity provider specific, such as CFD or Forex.
     /// </summary>
-    public enum LiquiditityProviderDataSource
+    public enum LiquidityProviderDataSource
     {
         /// Liquidity is exchange driven and not brokerage specific.
         NotApplicable,
@@ -544,7 +544,7 @@ namespace QuantConnect
         /// </summary>
         SplitAdjusted,
         /// <summary>
-        /// The raw price plus dividends
+        /// The split adjusted price plus dividends
         /// </summary>
         TotalReturn
     }

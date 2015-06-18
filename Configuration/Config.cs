@@ -14,9 +14,8 @@
 */
 
 using System;
-using System.Collections.Generic;
 using System.IO;
-using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using QuantConnect.Logging;
 
 namespace QuantConnect.Configuration
@@ -27,45 +26,32 @@ namespace QuantConnect.Configuration
     public static class Config
     {
         //Location of the configuration file.
-        private const string _config = "config.json";
+        private const string ConfigurationFileName = "config.json";
 
-        //Has the configuration been loaded from disk:
-        private static bool _loaded;
-
-        /// Initialize the settings array and its defaults:
-        private static Dictionary<string, string> _settings = new Dictionary<string, string>
+        private static readonly Lazy<JObject> Settings = new Lazy<JObject>(() =>
         {
-            //User configurable: Select which algorithm the engine can run.
-            {"algorithm-type-name", "BasicTemplateAlgorithm"},
-
-            //Engine code:
-            {"local", "true"},
-            {"live-mode", "false"},
-            {"data-folder", @"../../../Data/"},
-            {"result-handler", "QuantConnect.Lean.Engine.Results.ConsoleResultHandler"},
-            {"messaging-handler", "QuantConnect.Messaging.Messaging"},
-            {"queue-handler", "QuantConnect.Queues.Queues"},
-            {"api-handler", "QuantConnect.Api.Api"}
-        };
-
-        /// <summary>
-        /// Initialize the configuration file and if it doesnt exist create one with the default values above.
-        /// </summary>
-        private static void Initialize()
-        {
-            var file = "";
-            
-            if (_loaded) return;
-
-            // if we find the configuration, load it, otherwise just stick with the defaults in _settings
-            if (File.Exists(_config))
+            // initialize settings inside a lazy for free thread-safe, one-time initialization
+            if (!File.Exists(ConfigurationFileName))
             {
-                file = File.ReadAllText(_config);
-                _settings = JsonConvert.DeserializeObject<Dictionary<string, string>>(file);
+                return new JObject
+                {
+                    {"algorithm-type-name", "BasicTemplateAlgorithm"},
+                    {"local", true},
+                    {"live-mode", false},
+                    {"data-folder", "../../../Data/"},
+                    {"messaging-handler", "QuantConnect.Messaging.Messaging"},
+                    {"queue-handler", "QuantConnect.Queues.Queues"},
+                    {"api-handler", "QuantConnect.Api.Api"},
+                    {"setup-handler", "QuantConnect.Lean.Engine.Setup.ConsoleSetupHandler"},
+                    {"result-handler", "QuantConnect.Lean.Engine.Results.ConsoleResultHandler"},
+                    {"data-feed-handler", "QuantConnect.Lean.Engine.DataFeeds.FileSystemDataFeed"},
+                    {"real-time-handler", "QuantConnect.Lean.Engine.RealTime.BacktestingRealTimeHandler"},
+                    {"transaction-handler", "QuantConnect.Lean.Engine.TransactionHandlers.BacktestingTransactionHandler"}
+                };
             }
 
-            _loaded = true;
-        }
+            return JObject.Parse(File.ReadAllText(ConfigurationFileName));
+        });
         
         /// <summary>
         /// Get the matching config setting from the file searching for this key.
@@ -75,26 +61,13 @@ namespace QuantConnect.Configuration
         /// <returns>String value of the configuration setting or empty string if nothing found.</returns>
         public static string Get(string key, string defaultValue = "")
         {
-            var value = "";
-            try
+            var token = GetToken(Settings.Value, key);
+            if (token == null)
             {
-                if (!_loaded) Initialize();
-
-                if (_settings != null && _settings.ContainsKey(key))
-                {
-                    value = _settings[key];
-                }
-                else
-                {
-                    value = defaultValue;
-                    Log.Trace("Config.Get(): Configuration key not found. Key: " + key + " - Using default value: "+ defaultValue);
-                }
+                Log.Trace(string.Format("Config.Get(): Configuration key not found. Key: {0} - Using default value: {1}", key, defaultValue));
+                return defaultValue;
             }
-            catch (Exception err)
-            {
-                Log.Error("Config.Get(): " + err.Message);
-            }
-            return value;
+            return token.Value<string>();
         }
 
         /// <summary>
@@ -104,7 +77,7 @@ namespace QuantConnect.Configuration
         /// <param name="value">The new value</param>
         public static void Set(string key, string value)
         {
-            _settings[key] = value;
+            Settings.Value[key] = value;
         }
 
         /// <summary>
@@ -151,19 +124,46 @@ namespace QuantConnect.Configuration
         public static T GetValue<T>(string key, T defaultValue = default(T))
             where T : IConvertible
         {
-            var value = Get(key);
-            if (string.IsNullOrEmpty(value))
+            var token = GetToken(Settings.Value, key);
+            if (token == null)
             {
-                Log.Trace("Config.GetValue(): " + key + " - Using default value: " + defaultValue);
+                Log.Trace(string.Format("Config.GetValue(): {0} - Using default value: {1}", key, defaultValue));
                 return defaultValue;
             }
 
-            var type = typeof (T);
+            var type = typeof(T);
+            var value = token.Value<string>();
             if (type.IsEnum)
             {
                 return (T) Enum.Parse(type, value);
             }
-            return (T)Convert.ChangeType(value, type);
+            return (T) Convert.ChangeType(value, type);
+        }
+
+        private static JToken GetToken(JToken settings, string key)
+        {
+            return GetToken(settings, key, settings.SelectToken(key));
+        }
+
+        private static JToken GetToken(JToken settings, string key, JToken current)
+        {
+            var environmentSetting = settings.SelectToken("environment");
+            if (environmentSetting != null)
+            {
+                var environment = settings.SelectToken("environments." + environmentSetting.Value<string>());
+                var setting = environment.SelectToken(key);
+                if (setting != null)
+                {
+                    current = setting;
+                }
+                // allows nesting of environments, live.tradier, live.interactive, ect...
+                return GetToken(environment, key, current);
+            }
+            if (current == null)
+            {
+                return settings.SelectToken(key);
+            }
+            return current;
         }
     }
 }

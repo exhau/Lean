@@ -131,6 +131,7 @@
     <Compile Include="Data\Market\Split.cs" />
     <Compile Include="Data\Market\Splits.cs" />
     <Compile Include="Data\SubscriptionDataSource.cs" />
+    <Compile Include="Field.cs" />
     <Compile Include="Notifications\Notification.cs" />
     <Compile Include="Notifications\NotificationManager.cs" />
     <Compile Include="Orders\MarketOnCloseOrder.cs" />
@@ -225,6 +226,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Util\Composer.cs" />
     <Compile Include="Util\ExpressionBuilder.cs" />
+    <Compile Include="Util\FixedSizeHashQueue.cs" />
     <Compile Include="Util\FuncTextWriter.cs" />
     <Compile Include="Util\LinqExtensions.cs" />
     <Compile Include="Util\NullStringValueConverter.cs" />

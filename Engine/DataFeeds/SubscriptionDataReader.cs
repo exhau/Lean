@@ -396,9 +396,9 @@ namespace QuantConnect.Lean.Engine.DataFeeds
             switch (_config.DataNormalizationMode)
             {
                 case DataNormalizationMode.Raw:
-                case DataNormalizationMode.TotalReturn:
                     return;
                 
+                case DataNormalizationMode.TotalReturn:
                 case DataNormalizationMode.SplitAdjusted:
                     _config.PriceScaleFactor = _factorFile.GetSplitFactor(date);
                     break;
@@ -528,7 +528,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
 
                 if (_reader == null)
                 {
-                    Log.Error("Failed to get StreamReader for data source(" + _source + "), symbol(" + _mappedSymbol + "). Skipping date(" + date.ToShortDateString() + "). Reader is null.");
+                    Log.Error("Failed to get StreamReader for data source(" + _source.Source + "), symbol(" + _mappedSymbol + "). Skipping date(" + date.ToShortDateString() + "). Reader is null.");
                     //Engine.ResultHandler.DebugMessage("We could not find the requested data. This may be an invalid data request, failed download of custom data, or a public holiday. Skipping date (" + date.ToShortDateString() + ").");
                     if (_isDynamicallyLoadedData)
                     {
@@ -622,7 +622,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                 
                 case DataNormalizationMode.TotalReturn:
                     // we need to remove the dividends since we've been accumulating them in the price
-                    close -= _config.SumOfDividends;
+                    close = (close - _config.SumOfDividends)/_config.PriceScaleFactor;
                     break;
                 
                 default:
