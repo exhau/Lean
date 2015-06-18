@@ -1,9 +1,12 @@
 ﻿using QuantConnect.Data.Market;
+using QuantConnect.Data.Custom;
 
 namespace QuantConnect.Algorithm.Amigo
 {
     public class AmigoTestAlgo : QCAlgorithm
     {
+        private const string Symbol1 = "YAHOO/INDEX_SPY";
+        private const string Symbol2 = "YAHOO/IBM";
         /// <summary>
         /// Initialise the data and resolution required, as well as the cash and start-end dates for your algorithm. All algorithms must initialized.
         /// </summary>
@@ -14,6 +17,12 @@ namespace QuantConnect.Algorithm.Amigo
             SetCash(100000);             //Set Strategy Cash
             // Find more symbols here: http://quantconnect.com/data
             AddSecurity(SecurityType.Equity, "SPY", Resolution.Minute);
+            AddSecurity(SecurityType.Equity, "IBM", Resolution.Minute);
+
+            // request SPY data with minute resolution
+            AddData<Quandl>(Symbol1, Resolution.Daily, true, true);
+            // request SPY data with minute resolution
+            AddData<Quandl>(Symbol2, Resolution.Daily, true, true);
         }
 
         /// <summary>
@@ -21,6 +30,15 @@ namespace QuantConnect.Algorithm.Amigo
         /// </summary>
         /// <param name="data">TradeBars IDictionary object with your stock data</param>
         public void OnData(TradeBars data)
+        {
+            if (!Portfolio.Invested)
+            {
+                SetHoldings("SPY", 1);
+                Debug("Purchased Stock");
+            }
+        }
+
+        public void OnData(Quandl data)
         {
             if (!Portfolio.Invested)
             {
