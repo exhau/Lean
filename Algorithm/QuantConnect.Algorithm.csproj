@@ -78,6 +78,7 @@
       <Link>Properties\SharedAssemblyInfo.cs</Link>
     </Compile>
     <Compile Include="Amigo\AmigoTestAlgo.cs" />
+    <Compile Include="Amigo\QuantitativeSelection.cs" />
     <Compile Include="Amigo\SPArbitrageDaily.cs" />
     <Compile Include="Examples\BasicTemplateFillForwardAlgorithm.cs" />
     <Compile Include="Examples\BenchmarkAlgorithm.cs" />
