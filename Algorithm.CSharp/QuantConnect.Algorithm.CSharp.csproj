@@ -43,6 +43,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Amigo\AmigoTestAlgo.cs" />
+    <Compile Include="Amigo\QuantitativeSelection.cs" />
+    <Compile Include="Amigo\SPArbitrageDaily.cs" />
     <Compile Include="BasicTemplateAlgorithm.cs" />
     <Compile Include="BasicTemplateFillForwardAlgorithm.cs" />
     <Compile Include="BenchmarkAlgorithm.cs" />

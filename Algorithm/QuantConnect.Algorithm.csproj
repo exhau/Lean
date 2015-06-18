@@ -95,9 +95,6 @@
     <Compile Include="..\Common\Properties\SharedAssemblyInfo.cs">
       <Link>Properties\SharedAssemblyInfo.cs</Link>
     </Compile>
-    <Compile Include="Amigo\AmigoTestAlgo.cs" />
-    <Compile Include="Amigo\QuantitativeSelection.cs" />
-    <Compile Include="Amigo\SPArbitrageDaily.cs" />
     <Compile Include="QCAlgorithm.cs" />
     <Compile Include="QCAlgorithm.Trading.cs" />
     <Compile Include="QCAlgorithm.Indicators.cs" />

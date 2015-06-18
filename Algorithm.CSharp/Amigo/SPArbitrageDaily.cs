@@ -1,7 +1,5 @@
 ﻿using System;
 
-using MathNet.Numerics;
-
 using QuantConnect.Algorithm;
 using QuantConnect.Data.Custom;
 using QuantConnect.Data.Market;

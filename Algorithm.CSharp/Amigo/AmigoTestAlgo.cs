@@ -1,6 +1,4 @@
-﻿using MathNet.Numerics;
-
-using QuantConnect.Data.Market;
+﻿using QuantConnect.Data.Market;
 
 namespace QuantConnect.Algorithm.Amigo
 {
