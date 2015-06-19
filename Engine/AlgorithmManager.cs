@@ -16,9 +16,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Reflection;
 using System.Threading;
 using Fasterflect;
 using QuantConnect.Algorithm;
@@ -28,32 +25,29 @@ using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Lean.Engine.RealTime;
 using QuantConnect.Lean.Engine.Results;
-using QuantConnect.Lean.Engine.Setup;
 using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
-using QuantConnect.Securities;
 
 namespace QuantConnect.Lean.Engine
 {
     /// <summary>
     /// Algorithm manager class executes the algorithm and generates and passes through the algorithm events.
     /// </summary>
-    public static class AlgorithmManager
+    public class AlgorithmManager
     {
-
-        private static DateTime _previousTime;
-        private static AlgorithmStatus _algorithmState = AlgorithmStatus.Running;
-        private static readonly object _lock = new object();
-        private static string _algorithmId = "";
-        private static DateTime _currentTimeStepTime;
-        private static readonly TimeSpan _timeLoopMaximum = TimeSpan.FromMinutes(Config.GetDouble("algorithm-manager-time-loop-maximum", 10));
-        private static long _dataPointCount;
+        private DateTime _previousTime;
+        private AlgorithmStatus _algorithmState = AlgorithmStatus.Running;
+        private readonly object _lock = new object();
+        private string _algorithmId = "";
+        private DateTime _currentTimeStepTime;
+        private readonly TimeSpan _timeLoopMaximum = TimeSpan.FromMinutes(Config.GetDouble("algorithm-manager-time-loop-maximum", 10));
+        private long _dataPointCount;
 
         /// <summary>
         /// Publicly accessible algorithm status
         /// </summary>
-        public static AlgorithmStatus State
+        public AlgorithmStatus State
         {
             get
             {
@@ -64,7 +58,7 @@ namespace QuantConnect.Lean.Engine
         /// <summary>
         /// Public access to the currently running algorithm id.
         /// </summary>
-        public static string AlgorithmId
+        public string AlgorithmId
         {
             get
             {
@@ -75,7 +69,7 @@ namespace QuantConnect.Lean.Engine
         /// <summary>
         /// Gets the amount of time spent on the current time step
         /// </summary>
-        public static TimeSpan CurrentTimeStepElapsed
+        public TimeSpan CurrentTimeStepElapsed
         {
             get { return _currentTimeStepTime == DateTime.MinValue ? TimeSpan.Zero : DateTime.UtcNow - _currentTimeStepTime; }
         }
@@ -84,20 +78,15 @@ namespace QuantConnect.Lean.Engine
         /// Gets a function used with the Isolator for verifying we're not spending too much time in each
         /// algo manager timer loop
         /// </summary>
-        public static readonly Func<string> TimeLoopWithinLimits = () =>
-        {
-            if (CurrentTimeStepElapsed > _timeLoopMaximum)
-            {
-                return "Algorithm took longer than 10 minutes on a single time loop.";
-            }
-            return null;
-        };
+        public readonly Func<string> TimeLoopWithinLimits;
+
+        private readonly bool _liveMode;
 
         /// <summary>
         /// Quit state flag for the running algorithm. When true the user has requested the backtest stops through a Quit() method.
         /// </summary>
         /// <seealso cref="QCAlgorithm.Quit"/>
-        public static bool QuitState
+        public bool QuitState
         {
             get
             {
@@ -108,12 +97,25 @@ namespace QuantConnect.Lean.Engine
         /// <summary>
         /// Gets the number of data points processed per second
         /// </summary>
-        public static long DataPoints
+        public long DataPoints
         {
             get
             {
                 return _dataPointCount;
             }
+        }
+
+        public AlgorithmManager(bool liveMode)
+        {
+            TimeLoopWithinLimits = () =>
+            {
+                if (CurrentTimeStepElapsed > _timeLoopMaximum)
+                {
+                    return "Algorithm took longer than 10 minutes on a single time loop.";
+                }
+                return null;
+            };
+            _liveMode = liveMode;
         }
 
         /// <summary>
@@ -124,15 +126,14 @@ namespace QuantConnect.Lean.Engine
         /// <param name="feed">Datafeed object</param>
         /// <param name="transactions">Transaction manager object</param>
         /// <param name="results">Result handler object</param>
-        /// <param name="setup">Setup handler object</param>
         /// <param name="realtime">Realtime processing object</param>
         /// <param name="token">Cancellation token</param>
         /// <remarks>Modify with caution</remarks>
-        public static void Run(AlgorithmNodePacket job, IAlgorithm algorithm, IDataFeed feed, ITransactionHandler transactions, IResultHandler results, ISetupHandler setup, IRealTimeHandler realtime, CancellationToken token) 
+        public void Run(AlgorithmNodePacket job, IAlgorithm algorithm, IDataFeed feed, ITransactionHandler transactions, IResultHandler results, IRealTimeHandler realtime, CancellationToken token) 
         {
             //Initialize:
             _dataPointCount = 0;
-            var startingPortfolioValue = setup.StartingPortfolioValue;
+            var startingPortfolioValue = algorithm.Portfolio.TotalPortfolioValue;
             var backtestMode = (job.Type == PacketType.BacktestNode);
             var methodInvokers = new Dictionary<Type, MethodInvoker>();
             var marginCallFrequency = TimeSpan.FromMinutes(5);
@@ -141,7 +142,7 @@ namespace QuantConnect.Lean.Engine
             //Initialize Properties:
             _algorithmId = job.AlgorithmId;
             _algorithmState = AlgorithmStatus.Running;
-            _previousTime = setup.StartingDate.Date;
+            _previousTime = algorithm.StartDate.Date;
 
             //Create the method accessors to push generic types into algorithm: Find all OnData events:
 
@@ -185,7 +186,8 @@ namespace QuantConnect.Lean.Engine
 
             //Loop over the queues: get a data collection, then pass them all into relevent methods in the algorithm.
             Log.Trace("AlgorithmManager.Run(): Begin DataStream - Start: " + algorithm.StartDate + " Stop: " + algorithm.EndDate);
-            foreach (var newData in DataStream.GetData(feed, setup.StartingDate))
+            var dataStream = new DataStream(feed, _liveMode);
+            foreach (var newData in dataStream.GetData(algorithm.StartDate))
             {
                 // reset our timer on each loop
                 _currentTimeStepTime = DateTime.UtcNow;
@@ -196,7 +198,7 @@ namespace QuantConnect.Lean.Engine
                 //Execute with TimeLimit Monitor:
                 if (token.IsCancellationRequested) return;
 
-                var time = DataStream.AlgorithmTime;
+                var time = dataStream.AlgorithmTime;
 
                 //If we're in backtest mode we need to capture the daily performance. We do this here directly
                 //before updating the algorithm state with the new data from this time step, otherwise we'll
@@ -253,7 +255,7 @@ namespace QuantConnect.Lean.Engine
                 }
 
                 // perform margin calls, in live mode we can also use realtime to emit these
-                if (time >= nextMarginCallTime || (Engine.LiveMode && nextMarginCallTime > DateTime.Now))
+                if (time >= nextMarginCallTime || (_liveMode && nextMarginCallTime > DateTime.Now))
                 {
                     // determine if there are possible margin call orders to be executed
                     bool issueMarginCallWarning;
@@ -520,7 +522,7 @@ namespace QuantConnect.Lean.Engine
             results.ProcessSynchronousEvents(forceProcess: true);
 
             //Liquidate Holdings for Calculations:
-            if (_algorithmState == AlgorithmStatus.Liquidated || !Engine.LiveMode)
+            if (_algorithmState == AlgorithmStatus.Liquidated || !_liveMode)
             {
                 // without this we can't liquidate equities since the exchange is 'technically' closed
                 var hackedFrontier = algorithm.Time == DateTime.MinValue ? DateTime.MinValue : algorithm.Time.AddMilliseconds(-1);
@@ -557,27 +559,14 @@ namespace QuantConnect.Lean.Engine
 
             //Take final samples:
             results.SampleRange(algorithm.GetChartUpdates());
-            results.SampleEquity(DataStream.AlgorithmTime, Math.Round(algorithm.Portfolio.TotalPortfolioValue, 4));
-            results.SamplePerformance(DataStream.AlgorithmTime, Math.Round((algorithm.Portfolio.TotalPortfolioValue - startingPortfolioValue) * 100 / startingPortfolioValue, 10));
+            results.SampleEquity(dataStream.AlgorithmTime, Math.Round(algorithm.Portfolio.TotalPortfolioValue, 4));
+            results.SamplePerformance(dataStream.AlgorithmTime, Math.Round((algorithm.Portfolio.TotalPortfolioValue - startingPortfolioValue) * 100 / startingPortfolioValue, 10));
         } // End of Run();
-
-        /// <summary>
-        /// Reset all variables required before next loops
-        /// </summary>
-        public static void ResetManager() 
-        {
-            //Reset before the next loop/
-            DataStream.ResetFrontier();
-            _algorithmId = "";
-            _currentTimeStepTime = new DateTime();
-            _algorithmState = AlgorithmStatus.Running;
-        }
-
 
         /// <summary>
         /// Set the quit state.
         /// </summary>
-        public static void SetStatus(AlgorithmStatus state)
+        public void SetStatus(AlgorithmStatus state)
         {
             lock (_lock)
             {
@@ -598,7 +587,7 @@ namespace QuantConnect.Lean.Engine
         /// <param name="methodInvokers">The dictionary of method invokers</param>
         /// <param name="methodName">The name of the method to search for</param>
         /// <returns>True if the method existed and was added to the collection</returns>
-        private static bool AddMethodInvoker<T>(IAlgorithm algorithm, Dictionary<Type, MethodInvoker> methodInvokers, string methodName = "OnData")
+        private bool AddMethodInvoker<T>(IAlgorithm algorithm, Dictionary<Type, MethodInvoker> methodInvokers, string methodName = "OnData")
         {
             var newSplitMethodInfo = algorithm.GetType().GetMethod(methodName, new[] {typeof (T)});
             if (newSplitMethodInfo != null)

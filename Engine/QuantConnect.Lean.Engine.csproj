@@ -125,8 +125,6 @@
       <Link>Properties\SharedAssemblyInfo.cs</Link>
     </Compile>
     <Compile Include="AlgorithmManager.cs" />
-    <Compile Include="DataFeeds\BaseDataFeed.cs" />
-    <Compile Include="DataFeeds\IQFeedDataFeed.cs" />
     <Compile Include="DataFeeds\Auxiliary\FactorFile.cs" />
     <Compile Include="DataFeeds\Auxiliary\FactorFileRow.cs" />
     <Compile Include="DataFeeds\Auxiliary\MapFile.cs" />
@@ -141,11 +139,14 @@
     <Compile Include="DataFeeds\Transport\RemoteFileSubscriptionStreamReader.cs" />
     <Compile Include="DataFeeds\Transport\RestSubscriptionStreamReader.cs" />
     <Compile Include="DataStream.cs" />
+    <Compile Include="LeanEngineAlgorithmHandlers.cs" />
+    <Compile Include="LeanEngineSystemHandlers.cs" />
     <Compile Include="RealTime\RealTimeEvent.cs" />
     <Compile Include="RealTime\LiveTradingRealTimeHandler.cs" />
     <Compile Include="RealTime\BacktestingRealTimeHandler.cs" />
     <Compile Include="RealTime\IRealTimeHandler.cs" />
     <Compile Include="Results\DesktopResultHandler.cs" />
+    <Compile Include="Results\IResultHandler.cs" />
     <Compile Include="Setup\BrokerageSetupHandler.cs" />
     <Compile Include="Setup\SetupHandler.cs" />
     <Compile Include="StateCheck.cs" />
@@ -216,10 +217,6 @@
     <ProjectReference Include="..\Messaging\QuantConnect.Messaging.csproj">
       <Project>{f2e90e2d-ba25-40e2-b39a-0ba31e68f7f8}</Project>
       <Name>QuantConnect.Messaging</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\Algorithm.VisualBasic\QuantConnect.Algorithm.VisualBasic.vbproj">
-      <Project>{af8f124b-b441-4aa7-92b7-cea72bdb4118}</Project>
-      <Name>QuantConnect.Algorithm.VisualBasic</Name>
     </ProjectReference>
     <ProjectReference Include="..\Queues\QuantConnect.Queues.csproj">
       <Project>{d6633172-1368-4df6-9444-825c3e00c819}</Project>

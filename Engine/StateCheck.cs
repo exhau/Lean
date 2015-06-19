@@ -16,6 +16,8 @@
 
 using System;
 using System.Threading;
+using QuantConnect.Interfaces;
+using QuantConnect.Lean.Engine.Results;
 using QuantConnect.Logging;
 
 namespace QuantConnect.Lean.Engine
@@ -26,31 +28,41 @@ namespace QuantConnect.Lean.Engine
     /// </summary>
     public class StateCheck
     {
-
         /// DB Ping Class
         public class Ping
         {
             // set to true to break while loop in Run()
             private static volatile bool _exitTriggered;
 
+            private readonly AlgorithmManager _algorithmManager;
+            private readonly IApi _api;
+            private readonly IResultHandler _resultHandler;
+
+            public Ping(AlgorithmManager algorithmManager, IApi api, IResultHandler resultHandler)
+            {
+                _algorithmManager = algorithmManager;
+                _api = api;
+                _resultHandler = resultHandler;
+            }
+
             /// DB Ping Run Method:
-            public static void Run()
+            public void Run()
             {
                 while (!_exitTriggered)
                 {
                     try
                     {
                         Thread.Sleep(500);
-                        if (AlgorithmManager.AlgorithmId != "" && AlgorithmManager.QuitState == false)
+                        if (_algorithmManager.AlgorithmId != "" && _algorithmManager.QuitState == false)
                         {
                             //Get the state from the central server:
-                            var state = Engine.Api.GetAlgorithmStatus(AlgorithmManager.AlgorithmId);
+                            var state = _api.GetAlgorithmStatus(_algorithmManager.AlgorithmId);
 
                             //Set state via get/set method:
-                            AlgorithmManager.SetStatus(state.Status);
+                            _algorithmManager.SetStatus(state.Status);
 
                             //Set which chart the user is look at, so we can reduce excess messaging (e.g. trading 100 symbols, only send 1).
-                            Engine.ResultHandler.SetChartSubscription(state.ChartSubscription);
+                            _resultHandler.SetChartSubscription(state.ChartSubscription);
                         }
                     }
                     catch (ThreadAbortException)

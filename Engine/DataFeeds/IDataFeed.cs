@@ -20,6 +20,7 @@ using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
+using QuantConnect.Lean.Engine.Results;
 using QuantConnect.Packets;
 
 namespace QuantConnect.Lean.Engine.DataFeeds
@@ -27,7 +28,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
     /// <summary>
     /// Datafeed interface for creating custom datafeed sources.
     /// </summary>
-    [InheritedExport]
+    [InheritedExport(typeof(IDataFeed))]
     public interface IDataFeed
     {
         /// <summary>
@@ -106,7 +107,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
         /// <summary>
         /// Initializes the data feed for the specified job and algorithm
         /// </summary>
-        void Initialize(IAlgorithm algorithm, AlgorithmNodePacket job);
+        void Initialize(IAlgorithm algorithm, AlgorithmNodePacket job, IResultHandler resultHandler);
 
         /// <summary>
         /// Primary entry point.
