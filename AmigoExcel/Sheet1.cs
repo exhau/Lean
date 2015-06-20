@@ -1,15 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Data;
 using System.Linq;
-using System.Text;
-using System.Windows.Forms;
-using System.Xml.Linq;
-using Microsoft.Office.Tools.Excel;
-using Microsoft.VisualStudio.Tools.Applications.Runtime;
 using Excel = Microsoft.Office.Interop.Excel;
 using Office = Microsoft.Office.Core;
 
+using QuantConnect;
 using QuantConnect.Configuration;
 using QuantConnect.Lean.Engine;
 using QuantConnect.Lean.Engine.Results;
@@ -22,15 +16,22 @@ namespace AmigoExcel
 {
     public partial class Sheet1
     {
+        const int PnLStartColumn = 7;
+        const int StatisticsStartColumn = 3;
+
         private Engine _engine;
 
         //Form Business Logic:
         private Timer _polling;
         private IResultHandler _resultsHandler;
         private static Thread _leanEngineThread;
+
+        private Excel.ChartObject _pnLchart;
+
+        private int _numOfChartSeries;
+
         private void Sheet1_Startup(object sender, System.EventArgs e)
         {
-            this.Cells[3, 3] = "Result: ";
         }
 
         private void Sheet1_Shutdown(object sender, System.EventArgs e)
@@ -69,7 +70,10 @@ namespace AmigoExcel
             Config.Set("messaging-handler", "QuantConnect.Messaging.Messaging");
             Config.Set("job-queue-handler", "QuantConnect.Queues.JobQueue");
             Config.Set("api-handler", "QuantConnect.Api.Api");
-            Config.Set("result-handler", "QuantConnect.Lean.Engine.Results.DesktopResultHandler");
+            Config.Set("result-handler", "QuantConnect.Lean.Engine.Results.ConsoleResultHandler");
+
+            // Reset charting and performance area
+            ResetResultArea();
 
             //Start default backtest.
             var engine = LaunchLean();
@@ -85,8 +89,7 @@ namespace AmigoExcel
             _resultsHandler = engine.AlgorithmHandlers.Results;
 
             //Setup Polling Events:
-            _polling = new Timer();
-            _polling.Interval = 1000;
+            _polling = new Timer {Interval = 1000};
             _polling.Tick += PollingOnTick;
             _polling.Start();
         }
@@ -94,8 +97,6 @@ namespace AmigoExcel
         private static Engine LaunchLean()
         {
             //Launch the Lean Engine in another thread: this will run the algorithm specified above.
-            // TODO > This should only be launched when clicking a backtest/trade live button provided in the UX.
-
             var systemHandlers = LeanEngineSystemHandlers.FromConfiguration(Composer.Instance);
             var algorithmHandlers = LeanEngineAlgorithmHandlers.FromConfiguration(Composer.Instance);
             var engine = new Engine(systemHandlers, algorithmHandlers, Config.GetBool("live-mode"));
@@ -110,84 +111,76 @@ namespace AmigoExcel
 
         private void PollingOnTick(object sender, EventArgs eventArgs)
         {
-            Packet message;
             if (_resultsHandler == null) return;
-            DisplayStatistics();
 
-            while (_resultsHandler.Messages.TryDequeue(out message))
+            if (!_resultsHandler.IsActive)
             {
-                //Process the packet request:
-                switch (message.Type)
-                {
-                    case PacketType.BacktestResult:
-                        //Draw chart
-                        break;
-
-                    case PacketType.LiveResult:
-                        //Draw streaming chart
-                        break;
-
-                    case PacketType.AlgorithmStatus:
-                        //Algorithm status update
-                        break;
-
-                    case PacketType.RuntimeError:
-                        var runError = message as RuntimeErrorPacket;
-                        if (runError != null) AppendMessage(runError.Message);
-                        break;
-
-                    case PacketType.HandledError:
-                        var handledError = message as HandledErrorPacket;
-                        if (handledError != null) AppendMessage(handledError.Message);
-                        break;
-
-                    case PacketType.Log:
-                        var log = message as LogPacket;
-                        if (log != null) AppendMessage(log.Message);
-                        break;
-
-                    case PacketType.Debug:
-                        var debug = message as DebugPacket;
-                        if (debug != null) AppendMessage(debug.Message);
-                        break;
-
-                    case PacketType.OrderEvent:
-                        //New order event.
-                        break;
-
-                    default:
-                        throw new ArgumentOutOfRangeException();
-                }
+                DisplayStatistics();
+                DoPlot();
+                AlgoEnd();
             }
-        }
-
-        /// <summary>
-        /// Write to the console in specific font color.
-        /// </summary>
-        /// <param name="message">String to append</param>
-        /// <param name="color">Defaults to black</param>
-        private void AppendMessage(string message)
-        {
-            message = DateTime.Now.ToString("u") + " " + message + Environment.NewLine;
-
-            this.Cells[3, 3] += message;
+            
         }
 
         private void DisplayStatistics()
         {
             var result = _resultsHandler as ConsoleResultHandler;
-            if (!result.FinalStatistics.Any())
+            if (result != null && !result.FinalStatistics.Any())
                 return;
 
-            int i = 4;
+            int i = 2;
+            Cells[1, StatisticsStartColumn] = "Statistics: ";
             foreach(var stat in result.FinalStatistics)
             {
-                this.Cells[i, 3] = stat.Key;
-                this.Cells[i, 4] = stat.Value;
+                Cells[i, StatisticsStartColumn] = stat.Key;
+                Cells[i, StatisticsStartColumn + 1] = stat.Value;
                 ++i;
             }
+        }
 
-            AlgoEnd();
+        private void DoPlot()
+        {
+            var result = _resultsHandler as ConsoleResultHandler;
+
+            var chart = _pnLchart.Chart;
+            var oSeriesCollection = (Excel.SeriesCollection)chart.SeriesCollection();
+
+            //// Set chart range.
+
+            // Set chart properties.
+            chart.ChartType = Microsoft.Office.Interop.Excel.XlChartType.xlLine;
+
+            int j = PnLStartColumn;
+            _numOfChartSeries = 0;
+            foreach (var qcChart in result.Charts)
+            {
+                var series = qcChart.Value.Series;
+                if (!series.ContainsKey("Daily Performance"))
+                    continue;
+
+                decimal portfolioValue = 10000;
+                Excel.Series oSeries = oSeriesCollection.NewSeries();
+                oSeries.Name = qcChart.Key;
+
+                int i = 1;
+                Cells[i, j] = "Date";
+                Cells[i, j + 1] = qcChart.Key;
+                foreach (var chartpoint in series["Daily Performance"].Values)
+                {
+                    i++;
+                    portfolioValue *= (1 + chartpoint.y / 100);
+
+                    // Only daily performance is needed.
+                    Cells[i, j] = Time.UnixTimeStampToDateTime(chartpoint.x).Date;
+                    Cells[i, j + 1] = portfolioValue;
+                }
+
+                oSeries.Values = (Excel.Range)this.get_Range(Cells[2, j + 1], Cells[i, j + 1]);
+                oSeries.XValues = (Excel.Range)this.get_Range(Cells[2, j], Cells[i, j]);
+
+                j += 2;
+                _numOfChartSeries++;
+            }
         }
 
         private void button_BackTest_Stop_Click(object sender, EventArgs e)
@@ -199,8 +192,25 @@ namespace AmigoExcel
         {
             _polling.Stop();
             _engine.Dispose();
+
+            Composer.Instance.Reset();
             button_Start_BackTest.Enabled = true;
             button_BackTest_Stop.Enabled = false;
+        }
+
+        private void ResetResultArea()
+        {
+            // Delete existing PnL chart.
+            if (_pnLchart != null)
+                _pnLchart.Delete();
+
+            var charts = this.ChartObjects() as Excel.ChartObjects;
+            _pnLchart = charts.Add(0, 280, 900, 300);
+
+            // Clear the PnL area
+            Excel.Range range = (Excel.Range)this.get_Range(Cells[2, StatisticsStartColumn], Cells[2, PnLStartColumn + 2 * _numOfChartSeries - 1]);
+            range.EntireColumn.Delete();
+            System.Runtime.InteropServices.Marshal.ReleaseComObject(range);
         }
     }
 }
