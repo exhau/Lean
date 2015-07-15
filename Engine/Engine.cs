@@ -18,6 +18,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 using QuantConnect.Configuration;
 using QuantConnect.Interfaces;
@@ -35,7 +36,7 @@ namespace QuantConnect.Lean.Engine
     /// The engine loads new tasks, create the algorithms and threads, and sends them 
     /// to Algorithm Manager to be executed. It is the primary operating loop.
     /// </summary>
-    public class Engine : IDisposable
+    public class Engine
     {
         private readonly LeanEngineSystemHandlers _systemHandlers;
         private readonly LeanEngineAlgorithmHandlers _algorithmHandlers;
@@ -60,26 +61,6 @@ namespace QuantConnect.Lean.Engine
         private const string _collapseMessage = "Unhandled exception breaking past controls and causing collapse of algorithm node. This is likely a memory leak of an external dependency or the underlying OS terminating the LEAN engine.";
 
         /// <summary>
-        /// Maximum allowable ram for an algorithm
-        /// </summary>
-        public static int MaximumRamAllocation
-        {
-            get
-            {
-                //Total Physical Ram Available: 4gb max allocation per backtest
-                var allocation = 4096;
-                var ram = Convert.ToInt32(OS.TotalPhysicalMemory);
-                if (ram < allocation)
-                {
-                    //If memory on machine less 100 allocation for OS: 
-                    allocation = ram - 100;
-                }
-                Log.Trace("Engine.MaximumRamAllocation(): Allocated: " + allocation);
-                return allocation;
-            }
-        }
-
-        /// <summary>
         /// Primary Analysis Thread:
         /// </summary>
         public static void Main(string[] args)
@@ -88,7 +69,6 @@ namespace QuantConnect.Lean.Engine
 
             //Initialize:
             string mode = "RELEASE";
-            var isLocal = Config.GetBool("local");
             var liveMode = Config.GetBool("live-mode");
 
             #if DEBUG 
@@ -113,6 +93,18 @@ namespace QuantConnect.Lean.Engine
                 throw;
             }
 
+            //Setup packeting, queue and controls system: These don't do much locally.
+            leanEngineSystemHandlers.Initialize();
+
+            //-> Pull job from QuantConnect job queue, or, pull local build:
+            string assemblyPath;
+            var job = leanEngineSystemHandlers.JobQueue.NextJob(out assemblyPath);
+
+            if (job == null)
+            {
+                throw new Exception("Engine.Main(): Job was null.");
+            }
+
             LeanEngineAlgorithmHandlers leanEngineAlgorithmHandlers;
             try
             {
@@ -132,21 +124,37 @@ namespace QuantConnect.Lean.Engine
             Log.Trace("         Results:      " + leanEngineAlgorithmHandlers.Results.GetType().FullName);
             Log.Trace("         Transactions: " + leanEngineAlgorithmHandlers.Transactions.GetType().FullName);
 
-            //Setup packeting, queue and controls system: These don't do much locally.
-            leanEngineSystemHandlers.Initialize();
+            // if the job version doesn't match this instance version then we can't process it
+            // we also don't want to reprocess redelivered live jobs
+            if (job.Version != Constants.Version || (liveMode && job.Redelivered))
+            {
+                Log.Error("Engine.Run(): Job Version: " + job.Version + "  Deployed Version: " + Constants.Version);
 
-            using (var engine = new Engine(leanEngineSystemHandlers, leanEngineAlgorithmHandlers, liveMode))
-            {
-                engine.Run();
+                //Tiny chance there was an uncontrolled collapse of a server, resulting in an old user task circulating.
+                //In this event kill the old algorithm and leave a message so the user can later review.
+                leanEngineSystemHandlers.JobQueue.AcknowledgeJob(job);
+                leanEngineSystemHandlers.Api.SetAlgorithmStatus(job.AlgorithmId, AlgorithmStatus.RuntimeError, _collapseMessage);
+                leanEngineSystemHandlers.Notify.SetChannel(job.Channel);
+                leanEngineSystemHandlers.Notify.RuntimeError(job.AlgorithmId, _collapseMessage);
+                return;
             }
-            
-            // Make the console window pause so we can read log output before exiting and killing the application completely
-            if (isLocal)
+
+            try
             {
-                Log.Trace("Engine.Main(): Analysis Complete. Press any key to continue.");
-                Console.Read();
+                var engine = new Engine(leanEngineSystemHandlers, leanEngineAlgorithmHandlers, liveMode);
+                engine.Run(job, assemblyPath);
             }
-            Log.LogHandler.Dispose();
+            finally
+            {
+                //Delete the message from the job queue:
+                leanEngineSystemHandlers.JobQueue.AcknowledgeJob(job);
+                Log.Trace("Engine.Main(): Packet removed from queue: " + job.AlgorithmId);
+
+                // clean up resources
+                leanEngineSystemHandlers.Dispose();
+                leanEngineAlgorithmHandlers.Dispose();
+                Log.LogHandler.Dispose();
+            }
         }
 
         /// <summary>
@@ -165,7 +173,9 @@ namespace QuantConnect.Lean.Engine
         /// <summary>
         /// Runs a single backtest/live job from the job queue
         /// </summary>
-        public void Run()
+        /// <param name="job">The algorithm job to be processed</param>
+        /// <param name="assemblyPath">The path to the algorithm's assembly</param>
+        public void Run(AlgorithmNodePacket job, string assemblyPath)
         {
             var algorithm = default(IAlgorithm);
             var algorithmManager = new AlgorithmManager(_liveMode);
@@ -175,7 +185,6 @@ namespace QuantConnect.Lean.Engine
             var statusPingThread = new Thread(statusPing.Run);
             statusPingThread.Start();
 
-            AlgorithmNodePacket job = null;
             try
             {
                 //Reset thread holders.
@@ -185,34 +194,11 @@ namespace QuantConnect.Lean.Engine
                 Thread threadResults = null;
                 Thread threadRealTime = null;
 
-                var algorithmPath = "";
-                do
-                {
-                    //-> Pull job from QuantConnect job queue, or, pull local build:
-                    job = _systemHandlers.JobQueue.NextJob(out algorithmPath); // Blocking.
-
-                    // if the job version doesn't match this instance version then we can't process it
-                    // we also don't want to reprocess redelivered live jobs
-                    if (job.Version != Constants.Version || (_liveMode && job.Redelivered))
-                    {
-                        Log.Error("Engine.Run(): Job Version: " + job.Version + "  Deployed Version: " + Constants.Version);
-
-                        //Tiny chance there was an uncontrolled collapse of a server, resulting in an old user task circulating.
-                        //In this event kill the old algorithm and leave a message so the user can later review.
-                        _systemHandlers.JobQueue.AcknowledgeJob(job);
-                        _systemHandlers.Api.SetAlgorithmStatus(job.AlgorithmId, AlgorithmStatus.RuntimeError, _collapseMessage);
-                        _systemHandlers.Notify.SetChannel(job.Channel);
-                        _systemHandlers.Notify.RuntimeError(job.AlgorithmId, _collapseMessage);
-                        job = null;
-                    }
-                }
-                while (job == null);
-
                 //-> Initialize messaging system
                 _systemHandlers.Notify.SetChannel(job.Channel);
 
                 //-> Set the result handler type for this algorithm job, and launch the associated result thread.
-                _algorithmHandlers.Results.Initialize(job, _systemHandlers.Notify, _systemHandlers.Api, _algorithmHandlers.DataFeed, _algorithmHandlers.Setup);
+                _algorithmHandlers.Results.Initialize(job, _systemHandlers.Notify, _systemHandlers.Api, _algorithmHandlers.DataFeed, _algorithmHandlers.Setup, _algorithmHandlers.Transactions);
 
                 threadResults = new Thread(_algorithmHandlers.Results.Run, 0) {Name = "Result Thread"};
                 threadResults.Start();
@@ -221,10 +207,10 @@ namespace QuantConnect.Lean.Engine
                 try
                 {
                     // Save algorithm to cache, load algorithm instance:
-                    algorithm = _algorithmHandlers.Setup.CreateAlgorithmInstance(algorithmPath);
+                    algorithm = _algorithmHandlers.Setup.CreateAlgorithmInstance(assemblyPath, job.Language);
 
                     //Initialize the internal state of algorithm and job: executes the algorithm.Initialize() method.
-                    initializeComplete = _algorithmHandlers.Setup.Setup(algorithm, out brokerage, job, _algorithmHandlers.Results);
+                    initializeComplete = _algorithmHandlers.Setup.Setup(algorithm, out brokerage, job, _algorithmHandlers.Results, _algorithmHandlers.Transactions);
 
                     //If there are any reasons it failed, pass these back to the IDE.
                     if (!initializeComplete || algorithm.ErrorMessages.Count > 0 || _algorithmHandlers.Setup.Errors.Count > 0)
@@ -304,7 +290,7 @@ namespace QuantConnect.Lean.Engine
                             }
 
                             Log.Trace("Engine.Run(): Exiting Algorithm Manager");
-                        }, job.UserPlan == UserPlan.Free ? Math.Min(1024, MaximumRamAllocation) : MaximumRamAllocation);
+                        }, job.RamAllocation);
 
                         if (!complete)
                         {
@@ -343,7 +329,7 @@ namespace QuantConnect.Lean.Engine
                     try
                     {
                         var charts = new Dictionary<string, Chart>(_algorithmHandlers.Results.Charts);
-                        var orders = new Dictionary<int, Order>(algorithm.Transactions.Orders);
+                        var orders = new Dictionary<int, Order>(_algorithmHandlers.Transactions.Orders);
                         var holdings = new Dictionary<string, Holding>();
                         var statistics = new Dictionary<string, string>();
                         var banner = new Dictionary<string, string>();
@@ -395,7 +381,7 @@ namespace QuantConnect.Lean.Engine
 
                 //Close result handler:
                 _algorithmHandlers.Results.Exit();
-                StateCheck.Ping.Exit();
+                statusPing.Exit();
 
                 //Wait for the threads to complete:
                 var ts = Stopwatch.StartNew();
@@ -432,23 +418,11 @@ namespace QuantConnect.Lean.Engine
                 if (_liveMode && algorithmManager.State != AlgorithmStatus.Running && algorithmManager.State != AlgorithmStatus.RuntimeError)
                     _systemHandlers.Api.SetAlgorithmStatus(job.AlgorithmId, algorithmManager.State);
 
-                //Delete the message from the job queue:
-                _systemHandlers.JobQueue.AcknowledgeJob(job);
-                if (job != null) Log.Trace("Engine.Main(): Packet removed from queue: " + job.AlgorithmId);
-
-                //Attempt to clean up ram usage:
-                GC.Collect();
+                _algorithmHandlers.Results.Exit();
+                _algorithmHandlers.DataFeed.Exit();
+                _algorithmHandlers.Transactions.Exit();
+                _algorithmHandlers.RealTime.Exit();
             }
-        }
-
-        /// <summary>
-        /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
-        /// </summary>
-        /// <filterpriority>2</filterpriority>
-        public void Dispose()
-        {
-            _systemHandlers.Dispose();
-            _algorithmHandlers.Dispose();
         }
     } // End Algorithm Node Core Thread
 } // End Namespace

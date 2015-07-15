@@ -16,10 +16,12 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using Fasterflect;
 using QuantConnect.Algorithm;
 using QuantConnect.Configuration;
+using QuantConnect.Data;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.DataFeeds;
@@ -146,20 +148,18 @@ namespace QuantConnect.Lean.Engine
 
             //Create the method accessors to push generic types into algorithm: Find all OnData events:
 
-            // Algorithm 1.0 data accessors
-            var hasOnTradeBar = AddMethodInvoker<Dictionary<string, TradeBar>>(algorithm, methodInvokers, "OnTradeBar");
-            var hasOnTick = AddMethodInvoker<Dictionary<string, List<Tick>>>(algorithm, methodInvokers, "OnTick");
-
             // Algorithm 2.0 data accessors
             var hasOnDataTradeBars = AddMethodInvoker<TradeBars>(algorithm, methodInvokers);
             var hasOnDataTicks = AddMethodInvoker<Ticks>(algorithm, methodInvokers);
 
-            // determine what mode we're in
-            var backwardsCompatibilityMode = !hasOnDataTradeBars && !hasOnDataTicks;
-
             // dividend and split events
             var hasOnDataDividends = AddMethodInvoker<Dividends>(algorithm, methodInvokers);
             var hasOnDataSplits = AddMethodInvoker<Splits>(algorithm, methodInvokers);
+
+            // Algorithm 3.0 data accessors
+            var hasOnDataSlice = algorithm.GetType().GetMethods()
+                .Where(x => x.Name == "OnData" && x.GetParameters().Length == 1 && x.GetParameters()[0].ParameterType == typeof (Slice))
+                .FirstOrDefault(x => x.DeclaringType == algorithm.GetType()) != null;
 
             //Go through the subscription types and create invokers to trigger the event handlers for each custom type:
             foreach (var config in feed.Subscriptions) 
@@ -174,31 +174,42 @@ namespace QuantConnect.Lean.Engine
                     if (methodInvokers.ContainsKey(config.Type)) continue;
 
                     //If we couldnt find the event handler, let the user know we can't fire that event.
-                    if (genericMethod == null)
+                    if (genericMethod == null && !hasOnDataSlice)
                     {
                         algorithm.RunTimeError = new Exception("Data event handler not found, please create a function matching this template: public void OnData(" + config.Type.Name + " data) {  }");
                         _algorithmState = AlgorithmStatus.RuntimeError;
                         return;
                     }
-                    methodInvokers.Add(config.Type, genericMethod.DelegateForCallMethod());
+                    if (genericMethod != null)
+                    {
+                        methodInvokers.Add(config.Type, genericMethod.DelegateForCallMethod());
+                    }
                 }
             }
 
             //Loop over the queues: get a data collection, then pass them all into relevent methods in the algorithm.
             Log.Trace("AlgorithmManager.Run(): Begin DataStream - Start: " + algorithm.StartDate + " Stop: " + algorithm.EndDate);
-            var dataStream = new DataStream(feed, _liveMode);
-            foreach (var newData in dataStream.GetData(algorithm.StartDate))
+            foreach (var timeSlice in feed.Bridge.GetConsumingEnumerable(token))
             {
                 // reset our timer on each loop
                 _currentTimeStepTime = DateTime.UtcNow;
 
                 //Check this backtest is still running:
-                if (_algorithmState != AlgorithmStatus.Running) break;
+                if (_algorithmState != AlgorithmStatus.Running)
+                {
+                    Log.Error(string.Format("AlgorithmManager.Run(): Algorthm state changed to {0} at {1}", _algorithmState, timeSlice.Time));
+                    break;
+                }
 
                 //Execute with TimeLimit Monitor:
-                if (token.IsCancellationRequested) return;
+                if (token.IsCancellationRequested)
+                {
+                    Log.Error("AlgorithmManager.Run(): CancellationRequestion at " + timeSlice.Time);
+                    return;
+                }
 
-                var time = dataStream.AlgorithmTime;
+                var time = timeSlice.Time;
+                var newData = timeSlice.Data;
 
                 //If we're in backtest mode we need to capture the daily performance. We do this here directly
                 //before updating the algorithm state with the new data from this time step, otherwise we'll
@@ -226,15 +237,15 @@ namespace QuantConnect.Lean.Engine
 
                 //Update algorithm state after capturing performance from previous day
 
+                //Set the algorithm and real time handler's time
+                algorithm.SetDateTime(time);
+                realtime.SetTime(time);
+
                 //On each time step push the real time prices to the cashbook so we can have updated conversion rates
                 algorithm.Portfolio.CashBook.Update(newData);
 
                 //Update the securities properties: first before calling user code to avoid issues with data
                 algorithm.Securities.Update(time, newData);
-
-                //Set the algorithm and real time handler's time
-                algorithm.SetDateTime(time);
-                realtime.SetTime(time);
 
                 // process fill models on the updated data before entering algorithm, applies to all non-market orders
                 transactions.ProcessSynchronousEvents();
@@ -243,11 +254,13 @@ namespace QuantConnect.Lean.Engine
                 if (algorithm.GetQuit())
                 {
                     _algorithmState = AlgorithmStatus.Quit;
+                    Log.Trace("AlgorithmManager.Run(): Algorithm quit requested.");
                     break;
                 }
                 if (algorithm.RunTimeError != null)
                 {
                     _algorithmState = AlgorithmStatus.RuntimeError;
+                    Log.Trace(string.Format("AlgorithmManager.Run(): Algorithm encountered a runtime error at {0}. Error: {1}", timeSlice.Time, algorithm.RunTimeError));
                     break;
                 }
 
@@ -268,15 +281,15 @@ namespace QuantConnect.Lean.Engine
                         {
                             algorithm.RunTimeError = err;
                             _algorithmState = AlgorithmStatus.RuntimeError;
-                            Log.Debug("AlgorithmManager.Run(): RuntimeError: OnMarginCall: " + err.Message + " STACK >>> " + err.StackTrace);
+                            Log.Error("AlgorithmManager.Run(): RuntimeError: OnMarginCall: " + err.Message + " STACK >>> " + err.StackTrace);
                             return;
                         }
 
                         // execute the margin call orders
-                        var executedOrders = algorithm.Portfolio.MarginCallModel.ExecuteMarginCall(marginCallOrders);
-                        foreach (var order in executedOrders)
+                        var executedTickets = algorithm.Portfolio.MarginCallModel.ExecuteMarginCall(marginCallOrders);
+                        foreach (var ticket in executedTickets)
                         {
-                            algorithm.Error(string.Format("{0} - Executed MarginCallOrder: {1} - Quantity: {2} @ {3}", algorithm.Time, order.Symbol, order.Quantity, order.Price));
+                            algorithm.Error(string.Format("{0} - Executed MarginCallOrder: {1} - Quantity: {2} @ {3}", algorithm.Time, ticket.Symbol, ticket.Quantity, ticket.OrderEvents.Last().FillPrice));
                         }
                     }
                     // we didn't perform a margin call, but got the warning flag back, so issue the warning to the algorithm
@@ -290,7 +303,7 @@ namespace QuantConnect.Lean.Engine
                         {
                             algorithm.RunTimeError = err;
                             _algorithmState = AlgorithmStatus.RuntimeError;
-                            Log.Debug("AlgorithmManager.Run(): RuntimeError: OnMarginCallWarning: " + err.Message + " STACK >>> " + err.StackTrace);
+                            Log.Error("AlgorithmManager.Run(): RuntimeError: OnMarginCallWarning: " + err.Message + " STACK >>> " + err.StackTrace);
                         }
                     }
 
@@ -298,8 +311,6 @@ namespace QuantConnect.Lean.Engine
                 }
 
                 //Trigger the data events: Invoke the types we have data for:
-                var oldBars = new Dictionary<string, TradeBar>();
-                var oldTicks = new Dictionary<string, List<Tick>>();
                 var newBars = new TradeBars(time);
                 var newTicks = new Ticks(time);
                 var newDividends = new Dividends(time);
@@ -377,14 +388,7 @@ namespace QuantConnect.Lean.Engine
                             var bar = dataPoint as TradeBar;
                             if (bar != null)
                             {
-                                if (backwardsCompatibilityMode)
-                                {
-                                    oldBars[bar.Symbol] = bar;
-                                }
-                                else
-                                {
-                                    newBars[bar.Symbol] = bar;
-                                }
+                                newBars[bar.Symbol] = bar;
                                 continue;
                             }
                         }
@@ -395,26 +399,13 @@ namespace QuantConnect.Lean.Engine
                             var tick = dataPoint as Tick;
                             if (tick != null)
                             {
-                                if (backwardsCompatibilityMode)
+                                List<Tick> ticks;
+                                if (!newTicks.TryGetValue(tick.Symbol, out ticks))
                                 {
-                                    List<Tick> ticks;
-                                    if (!oldTicks.TryGetValue(tick.Symbol, out ticks))
-                                    {
-                                        ticks = new List<Tick>(3);
-                                        oldTicks.Add(tick.Symbol, ticks);
-                                    }
-                                    ticks.Add(tick);
+                                    ticks = new List<Tick>(3);
+                                    newTicks.Add(tick.Symbol, ticks);
                                 }
-                                else
-                                {
-                                    List<Tick> ticks;
-                                    if (!newTicks.TryGetValue(tick.Symbol, out ticks))
-                                    {
-                                        ticks = new List<Tick>(3);
-                                        newTicks.Add(tick.Symbol, ticks);
-                                    }
-                                    ticks.Add(tick);
-                                }
+                                ticks.Add(tick);
                                 continue;
                             }
                         }
@@ -425,13 +416,17 @@ namespace QuantConnect.Lean.Engine
                         //Send data into the generic algorithm event handlers
                         try
                         {
-                            methodInvokers[config.Type](algorithm, dataPoint);
+                            MethodInvoker methodInvoker;
+                            if (methodInvokers.TryGetValue(config.Type, out methodInvoker))
+                            {
+                                methodInvoker(algorithm, dataPoint);
+                            }
                         }
                         catch (Exception err)
                         {
                             algorithm.RunTimeError = err;
                             _algorithmState = AlgorithmStatus.RuntimeError;
-                            Log.Debug("AlgorithmManager.Run(): RuntimeError: Custom Data: " + err.Message + " STACK >>> " + err.StackTrace);
+                            Log.Error("AlgorithmManager.Run(): RuntimeError: Custom Data: " + err.Message + " STACK >>> " + err.StackTrace);
                             return;
                         }
                     }
@@ -453,42 +448,33 @@ namespace QuantConnect.Lean.Engine
                 {
                     algorithm.RunTimeError = err;
                     _algorithmState = AlgorithmStatus.RuntimeError;
-                    Log.Debug("AlgorithmManager.Run(): RuntimeError: Dividends/Splits: " + err.Message + " STACK >>> " + err.StackTrace);
+                    Log.Error("AlgorithmManager.Run(): RuntimeError: Dividends/Splits: " + err.Message + " STACK >>> " + err.StackTrace);
                     return;
                 }
 
                 //After we've fired all other events in this second, fire the pricing events:
-                if (backwardsCompatibilityMode)
+                try
                 {
-                    //Log.Debug("AlgorithmManager.Run(): Invoking v1.0 Event Handlers...");
-                    try
-                    {
-                        if (hasOnTradeBar && oldBars.Count > 0) methodInvokers[typeof (Dictionary<string, TradeBar>)](algorithm, oldBars);
-                        if (hasOnTick && oldTicks.Count > 0) methodInvokers[typeof (Dictionary<string, List<Tick>>)](algorithm, oldTicks);
-                    }
-                    catch (Exception err)
-                    {
-                        algorithm.RunTimeError = err;
-                        _algorithmState = AlgorithmStatus.RuntimeError;
-                        Log.Debug("AlgorithmManager.Run(): RuntimeError: Backwards Compatibility Mode: " + err.Message + " STACK >>> " + err.StackTrace);
-                        return;
-                    }
+                    if (hasOnDataTradeBars && newBars.Count > 0) methodInvokers[typeof (TradeBars)](algorithm, newBars);
+                    if (hasOnDataTicks && newTicks.Count > 0) methodInvokers[typeof (Ticks)](algorithm, newTicks);
                 }
-                else
+                catch (Exception err)
                 {
-                    try
-                    {
-                        if (hasOnDataTradeBars && newBars.Count > 0) methodInvokers[typeof (TradeBars)](algorithm, newBars);
-                        if (hasOnDataTicks && newTicks.Count > 0) methodInvokers[typeof (Ticks)](algorithm, newTicks);
-                    }
-                    catch (Exception err)
-                    {
-                        algorithm.RunTimeError = err;
-                        _algorithmState = AlgorithmStatus.RuntimeError;
-                        Log.Debug("AlgorithmManager.Run(): RuntimeError: New Style Mode: " + err.Message + " STACK >>> " + err.StackTrace);
-                        return;
-                    }
+                    algorithm.RunTimeError = err;
+                    _algorithmState = AlgorithmStatus.RuntimeError;
+                    Log.Error("AlgorithmManager.Run(): RuntimeError: New Style Mode: " + err.Message + " STACK >>> " + err.StackTrace);
+                    return;
                 }
+
+                // EVENT HANDLER v3.0 -- all data in a single event
+                var slice = new Slice(time, newData.Values.SelectMany(x => x),
+                    newBars.Count == 0 ? null : newBars,
+                    newTicks.Count == 0 ? null : newTicks,
+                    newSplits.Count == 0 ? null : newSplits,
+                    newDividends.Count == 0 ? null : newDividends
+                    );
+
+                algorithm.OnData(slice);
 
                 //If its the historical/paper trading models, wait until market orders have been "filled"
                 // Manually trigger the event handler to prevent thread switch.
@@ -499,7 +485,10 @@ namespace QuantConnect.Lean.Engine
 
                 // Process any required events of the results handler such as sampling assets, equity, or stock prices.
                 results.ProcessSynchronousEvents();
-            } // End of ForEach DataStream
+            } // End of ForEach feed.Bridge.GetConsumingEnumerable
+
+            // stop timing the loops
+            _currentTimeStepTime = DateTime.MinValue;
 
             //Stream over:: Send the final packet and fire final events:
             Log.Trace("AlgorithmManager.Run(): Firing On End Of Algorithm...");
@@ -511,7 +500,7 @@ namespace QuantConnect.Lean.Engine
             {
                 _algorithmState = AlgorithmStatus.RuntimeError;
                 algorithm.RunTimeError = new Exception("Error running OnEndOfAlgorithm(): " + err.Message, err.InnerException);
-                Log.Debug("AlgorithmManager.OnEndOfAlgorithm(): " + err.Message + " STACK >>> " + err.StackTrace);
+                Log.Error("AlgorithmManager.OnEndOfAlgorithm(): " + err.Message + " STACK >>> " + err.StackTrace);
                 return;
             }
 
@@ -522,11 +511,13 @@ namespace QuantConnect.Lean.Engine
             if (_algorithmState == AlgorithmStatus.Liquidated || !_liveMode)
             {
                 // without this we can't liquidate equities since the exchange is 'technically' closed
-                var hackedFrontier = algorithm.Time == DateTime.MinValue ? DateTime.MinValue : algorithm.Time.AddMilliseconds(-1);
+                var hackedFrontier = algorithm.UtcTime == DateTime.MinValue ? DateTime.MinValue : algorithm.UtcTime.AddMilliseconds(-1);
                 algorithm.SetDateTime(hackedFrontier);
-                foreach (var security in algorithm.Securities)
+                foreach (var security in algorithm.Securities.Values)
                 {
-                    security.Value.SetMarketPrice(hackedFrontier, null);
+                    // this is purely to set the exchange times, not sexy
+                    var beforeMarketClose = (security.Exchange.LocalTime.Date + security.Exchange.MarketClose).AddMilliseconds(-1);
+                    security.Exchange.SetLocalDateTimeFrontier(beforeMarketClose);
                 }
 
                 Log.Trace("AlgorithmManager.Run(): Liquidating algorithm holdings...");
@@ -556,8 +547,8 @@ namespace QuantConnect.Lean.Engine
 
             //Take final samples:
             results.SampleRange(algorithm.GetChartUpdates());
-            results.SampleEquity(dataStream.AlgorithmTime, Math.Round(algorithm.Portfolio.TotalPortfolioValue, 4));
-            results.SamplePerformance(dataStream.AlgorithmTime, Math.Round((algorithm.Portfolio.TotalPortfolioValue - startingPortfolioValue) * 100 / startingPortfolioValue, 10));
+            results.SampleEquity(_previousTime, Math.Round(algorithm.Portfolio.TotalPortfolioValue, 4));
+            results.SamplePerformance(_previousTime, Math.Round((algorithm.Portfolio.TotalPortfolioValue - startingPortfolioValue) * 100 / startingPortfolioValue, 10));
         } // End of Run();
 
         /// <summary>

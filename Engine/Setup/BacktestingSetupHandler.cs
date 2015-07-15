@@ -22,8 +22,10 @@ using QuantConnect.AlgorithmFactory;
 using QuantConnect.Brokerages.Backtesting;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.Results;
+using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
+using QuantConnect.Securities;
 
 namespace QuantConnect.Lean.Engine.Setup
 {
@@ -108,15 +110,16 @@ namespace QuantConnect.Lean.Engine.Setup
         /// instantiation to take less than 10 seconds
         /// </summary>
         /// <param name="assemblyPath">Physical location of the assembly.</param>
+        /// <param name="language">Language of the DLL</param>
         /// <returns>Algorithm instance.</returns>
-        public IAlgorithm CreateAlgorithmInstance(string assemblyPath)
+        public IAlgorithm CreateAlgorithmInstance(string assemblyPath, Language language)
         {
             string error;
             IAlgorithm algorithm;
 
             // limit load times to 10 seconds and force the assembly to have exactly one derived type
-            var loader = new Loader(TimeSpan.FromSeconds(10), names => names.SingleOrDefault()) {TryLoadDebugInformation = true};
-            bool complete = loader.TryCreateAlgorithmInstanceWithIsolator(assemblyPath, out algorithm, out error);
+            var loader = new Loader(language, TimeSpan.FromSeconds(15), names => names.SingleOrDefault());
+            var complete = loader.TryCreateAlgorithmInstanceWithIsolator(assemblyPath, out algorithm, out error);
             if (!complete) throw new Exception(error + " Try re-building algorithm.");
 
             return algorithm;
@@ -128,9 +131,10 @@ namespace QuantConnect.Lean.Engine.Setup
         /// <param name="algorithm">Algorithm instance</param>
         /// <param name="brokerage">Brokerage instance</param>
         /// <param name="baseJob">Algorithm job</param>
-        /// <param name="resultHandler"></param>
+        /// <param name="resultHandler">The configured result handler</param>
+        /// <param name="transactionHandler">The configurated transaction handler</param>
         /// <returns>Boolean true on successfully initializing the algorithm</returns>
-        public bool Setup(IAlgorithm algorithm, out IBrokerage brokerage, AlgorithmNodePacket baseJob, IResultHandler resultHandler)
+        public bool Setup(IAlgorithm algorithm, out IBrokerage brokerage, AlgorithmNodePacket baseJob, IResultHandler resultHandler, ITransactionHandler transactionHandler)
         {
             var job = baseJob as BacktestNodePacket;
             if (job == null)
@@ -170,7 +174,7 @@ namespace QuantConnect.Lean.Engine.Setup
                     //Initialise the algorithm, get the required data:
                     algorithm.Initialize();
                     //Add currency data feeds that weren't explicity added in Initialize
-                    algorithm.Portfolio.CashBook.EnsureCurrencyDataFeeds(algorithm.Securities, algorithm.SubscriptionManager);
+                    algorithm.Portfolio.CashBook.EnsureCurrencyDataFeeds(algorithm.Securities, algorithm.SubscriptionManager, SecurityExchangeHoursProvider.FromDataFolder());
                 }
                 catch (Exception err)
                 {
@@ -185,6 +189,7 @@ namespace QuantConnect.Lean.Engine.Setup
             brokerage = new BacktestingBrokerage(algorithm);
 
             SetupHandler.UpdateTransactionModels(algorithm, algorithm.BrokerageModel);
+            algorithm.Transactions.SetOrderProcessor(transactionHandler);
 
             //Calculate the max runtime for the strategy
             _maxRuntime = GetMaximumRuntime(job.PeriodStart, job.PeriodFinish, algorithm.SubscriptionManager.Count);

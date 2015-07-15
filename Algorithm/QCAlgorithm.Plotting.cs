@@ -213,7 +213,8 @@ namespace QuantConnect.Algorithm
         /// <summary>
         /// Automatically plots each indicator when a new value is available
         /// </summary>
-        public void PlotIndicator(string chart, params IndicatorBase<IndicatorDataPoint>[] indicators)
+        public void PlotIndicator<T>(string chart, params IndicatorBase<T>[] indicators)
+            where T : BaseData
         {
             foreach (var i in indicators)
             {
@@ -222,6 +223,26 @@ namespace QuantConnect.Algorithm
                 i.Updated += (sender, args) =>
                 {
                     Plot(chart, ilocal);
+                };
+            }
+        }
+
+        /// <summary>
+        /// Automatically plots each indicator when a new value is available, optionally waiting for indicator.IsReady to return true
+        /// </summary>
+        public void PlotIndicator<T>(string chart, bool waitForReady, params IndicatorBase<T>[] indicators)
+            where T : BaseData
+        {
+            foreach (var i in indicators)
+            {
+                // copy loop variable for usage in closure
+                var ilocal = i;
+                i.Updated += (sender, args) =>
+                {
+                    if (!waitForReady || ilocal.IsReady)
+                    {
+                        Plot(chart, ilocal);
+                    }
                 };
             }
         }

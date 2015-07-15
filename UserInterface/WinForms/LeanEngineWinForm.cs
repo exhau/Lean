@@ -96,7 +96,6 @@ namespace QuantConnect.Views.WinForms
             // lean directory we write a new config in the UX output directory.
             // TODO > Most of this should be configured through a helper form in the UX.
             Config.Set("algorithm-type-name", algorithm);
-            Config.Set("local", "true");
             Config.Set("live-mode", "false");
             Config.Set("messaging-handler", "QuantConnect.Messaging.Messaging");
             Config.Set("job-queue-handler", "QuantConnect.Queues.JobQueue");
@@ -124,7 +123,10 @@ namespace QuantConnect.Views.WinForms
             var engine = new Engine(systemHandlers, algorithmHandlers, Config.GetBool("live-mode"));
             _leanEngineThread = new Thread(() =>
             {
-                engine.Run();
+                string algorithmPath;
+                var job = systemHandlers.JobQueue.NextJob(out algorithmPath);
+                engine.Run(job, algorithmPath);
+                systemHandlers.JobQueue.AcknowledgeJob(job);
             });
             _leanEngineThread.Start();
 

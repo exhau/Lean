@@ -22,8 +22,10 @@ using QuantConnect.Configuration;
 using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine.Results;
+using QuantConnect.Lean.Engine.TransactionHandlers;
 using QuantConnect.Logging;
 using QuantConnect.Packets;
+using QuantConnect.Securities;
 using QuantConnect.Util;
 
 namespace QuantConnect.Lean.Engine.Setup
@@ -77,13 +79,13 @@ namespace QuantConnect.Lean.Engine.Setup
         /// </summary>
         /// <param name="assemblyPath">The path to the assembly's location</param>
         /// <returns>A new instance of IAlgorithm, or throws an exception if there was an error</returns>
-        public IAlgorithm CreateAlgorithmInstance(string assemblyPath)
+        public IAlgorithm CreateAlgorithmInstance(string assemblyPath, Language language)
         {
             string error;
             IAlgorithm algorithm;
 
             // limit load times to 10 seconds and force the assembly to have exactly one derived type
-            var loader = new Loader(TimeSpan.FromSeconds(10), names =>
+            var loader = new Loader(language, TimeSpan.FromSeconds(15), names =>
             {
                 // if there's only one use that guy
                 if (names.Count == 1)
@@ -96,7 +98,6 @@ namespace QuantConnect.Lean.Engine.Setup
                 return names.Single(x => x.Contains(algorithmName));
             });
 
-            loader.TryLoadDebugInformation = !Config.GetBool("local");
             var complete = loader.TryCreateAlgorithmInstanceWithIsolator(assemblyPath, out algorithm, out error);
             if (!complete) throw new Exception(error + " Try re-building algorithm.");
 
@@ -109,9 +110,10 @@ namespace QuantConnect.Lean.Engine.Setup
         /// <param name="algorithm">Algorithm instance</param>
         /// <param name="brokerage">New brokerage output instance</param>
         /// <param name="job">Algorithm job task</param>
-        /// <param name="resultHandler"></param>
+        /// <param name="resultHandler">The configured result handler</param>
+        /// <param name="transactionHandler">The configurated transaction handler</param>
         /// <returns>True on successfully setting up the algorithm state, or false on error.</returns>
-        public bool Setup(IAlgorithm algorithm, out IBrokerage brokerage, AlgorithmNodePacket job, IResultHandler resultHandler)
+        public bool Setup(IAlgorithm algorithm, out IBrokerage brokerage, AlgorithmNodePacket job, IResultHandler resultHandler, ITransactionHandler transactionHandler)
         {
             _algorithm = algorithm;
             brokerage = default(IBrokerage);
@@ -212,6 +214,7 @@ namespace QuantConnect.Lean.Engine.Setup
 
                 // set the transaction models base on the brokerage properties
                 SetupHandler.UpdateTransactionModels(algorithm, algorithm.BrokerageModel);
+                algorithm.Transactions.SetOrderProcessor(transactionHandler);
 
                 try
                 {
@@ -258,7 +261,7 @@ namespace QuantConnect.Lean.Engine.Setup
                         // be sure to assign order IDs such that we increment from the SecurityTransactionManager to avoid ID collisions
                         Log.Trace("BrokerageSetupHandler.Setup(): Has open order: " + order.Symbol + " - " + order.Quantity);
                         order.Id = algorithm.Transactions.GetIncrementOrderId();
-                        algorithm.Orders.AddOrUpdate(order.Id, order, (i, o) => order);
+                        transactionHandler.Orders.AddOrUpdate(order.Id, order, (i, o) => order);
                     }
                 }
                 catch (Exception err)
@@ -280,10 +283,10 @@ namespace QuantConnect.Lean.Engine.Setup
                         {
                             Log.Trace("BrokerageSetupHandler.Setup(): Adding unrequested security: " + holding.Symbol);
                             // for items not directly requested set leverage to 1 and at the min resolution
-                            algorithm.AddSecurity(holding.Type, holding.Symbol, minResolution.Value, true, 1.0m, false);
+                            algorithm.AddSecurity(holding.Type, holding.Symbol, minResolution.Value, null, true, 1.0m, false);
                         }
                         algorithm.Portfolio[holding.Symbol].SetHoldings(holding.AveragePrice, (int) holding.Quantity);
-                        algorithm.Securities[holding.Symbol].SetMarketPrice(DateTime.Now, new TradeBar
+                        algorithm.Securities[holding.Symbol].SetMarketPrice(new TradeBar
                         {
                             Time = DateTime.Now,
                             Open = holding.MarketPrice,
@@ -304,7 +307,7 @@ namespace QuantConnect.Lean.Engine.Setup
                 }
 
                 // call this after we've initialized everything from the brokerage since we may have added some holdings/currencies
-                algorithm.Portfolio.CashBook.EnsureCurrencyDataFeeds(algorithm.Securities, algorithm.SubscriptionManager);
+                algorithm.Portfolio.CashBook.EnsureCurrencyDataFeeds(algorithm.Securities, algorithm.SubscriptionManager, SecurityExchangeHoursProvider.FromDataFolder());
 
                 //Set the starting portfolio value for the strategy to calculate performance:
                 StartingPortfolioValue = algorithm.Portfolio.TotalPortfolioValue;

@@ -139,14 +139,14 @@ namespace QuantConnect.Lean.Engine.RealTime
                 try
                 {
                     _algorithm.OnEndOfDay();
-                    Log.Trace(string.Format("BacktestingRealTimeHandler: Fired On End of Day Event() for Day({0})", _time.ToShortDateString()));
+                    Log.Debug(string.Format("BacktestingRealTimeHandler: Fired On End of Day Event() for Day({0})", _time.ToShortDateString()));
                 }
                 catch (Exception err)
                 {
                     _resultHandler.RuntimeError("Runtime error in OnEndOfDay event: " + err.Message, err.StackTrace);
                     Log.Error("BacktestingRealTimeHandler.SetupEvents.Trigger OnEndOfDay(): " + err.Message);
                 }
-            }, true));
+            }));
         }
         
         /// <summary>
@@ -204,23 +204,20 @@ namespace QuantConnect.Lean.Engine.RealTime
         /// <param name="time">Current time.</param>
         public void SetTime(DateTime time)
         {
-            //Check for day reset:
-            if (_time.Date != time.Date)
-            {
-                // Backtest Mode Only: 
-                // > Scan & trigger any remaining events which haven't been triggered (e.g. daily bar data with "daily event" at 4pm):
-                ScanEvents();
-
-                //Reset all the daily events with today's date:
-                SetupEvents(time.Date);
-            }
-
+            var isDayChange = _time.Date != time.Date;
             //Set the time:
             _time = time;
 
             // Backtest Mode Only: 
             // > Scan the event every time we set the time. This allows "fast-forwarding" of the realtime events into sync with backtest.
             ScanEvents();
+
+            //Check for day reset:
+            if (isDayChange)
+            {
+                //Reset all the daily events with today's date:
+                SetupEvents(time.Date);
+            }
         }
 
         /// <summary>

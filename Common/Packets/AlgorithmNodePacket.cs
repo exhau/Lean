@@ -72,6 +72,12 @@ namespace QuantConnect.Packets
         public UserPlan UserPlan = UserPlan.Free;
 
         /// <summary>
+        /// Language flag: Currently represents IL code or Dynamic Scripted Types.
+        /// </summary>
+        [JsonProperty(PropertyName = "eLanguage")]
+        public Language Language = Language.CSharp;
+
+        /// <summary>
         /// Server type for the deployment (512, 1024, 2048)
         /// </summary>
         [JsonProperty(PropertyName = "sServerType")]
@@ -107,6 +113,12 @@ namespace QuantConnect.Packets
         /// </summary>
         [JsonProperty(PropertyName = "sRequestSource")]
         public string RequestSource = "WebIDE";
+
+        /// <summary>
+        /// The maximum amount of RAM (in MB) this algorithm is allowed to utilize
+        /// </summary>
+        [JsonProperty(PropertyName = "iMaxRamAllocation")]
+        public int RamAllocation;
     } // End Node Packet:
 
 } // End of Namespace:

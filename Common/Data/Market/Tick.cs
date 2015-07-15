@@ -100,13 +100,14 @@ namespace QuantConnect.Data.Market
         }
 
         /// <summary>
-        /// Cloner constructor for fill formward engine implementation. Clone the original tick into this new tick:
+        /// Cloner constructor for fill forward engine implementation. Clone the original tick into this new tick:
         /// </summary>
         /// <param name="original">Original tick we're cloning</param>
         public Tick(Tick original) 
         {
             Symbol = original.Symbol;
             Time = new DateTime(original.Time.Ticks);
+            Value = original.Value;
             BidPrice = original.BidPrice;
             AskPrice = original.AskPrice;
             Exchange = original.Exchange;
@@ -129,7 +130,7 @@ namespace QuantConnect.Data.Market
             DataType = MarketDataType.Tick;
             Time = time;
             Symbol = symbol;
-            Value = bid + (ask - bid) / 2;
+            Value = (bid + ask) / 2;
             TickType = TickType.Quote;
             BidPrice = bid;
             AskPrice = ask;
@@ -166,7 +167,7 @@ namespace QuantConnect.Data.Market
             DataType = MarketDataType.Tick;
             Symbol = symbol;
             Time = DateTime.ParseExact(csv[0], DateFormat.Forex, CultureInfo.InvariantCulture);
-            Value = BidPrice + (AskPrice - BidPrice) / 2;
+            Value = (BidPrice + AskPrice) / 2;
             TickType = TickType.Quote;
             BidPrice = Convert.ToDecimal(csv[1], CultureInfo.InvariantCulture);
             AskPrice = Convert.ToDecimal(csv[2], CultureInfo.InvariantCulture);
@@ -183,13 +184,13 @@ namespace QuantConnect.Data.Market
             var csv = line.Split(',');
             DataType = MarketDataType.Tick;
             Symbol = symbol;
-            Time = baseDate.Date.AddMilliseconds(Convert.ToInt32(csv[0]));
+            Time = baseDate.Date.AddMilliseconds(csv[0].ToInt32());
             Value = csv[1].ToDecimal()/10000m;
             TickType = TickType.Trade;
-            Quantity = Convert.ToInt32(csv[2]);
+            Quantity = csv[2].ToInt32();
             Exchange = csv[3].Trim();
             SaleCondition = csv[4];
-            Suspicious = Convert.ToInt32(csv[5]) == 1;
+            Suspicious = csv[5].ToInt32() == 1;
         }
 
 
@@ -211,10 +212,10 @@ namespace QuantConnect.Data.Market
                 { 
                     case SecurityType.Equity:
                         Symbol = config.Symbol;
-                        Time = date.Date.AddMilliseconds(Convert.ToInt64(csv[0]));
+                        Time = date.Date.AddMilliseconds(csv[0].ToInt64());
                         Value = config.GetNormalizedPrice(csv[1].ToDecimal() / 10000m);
                         TickType = TickType.Trade;
-                        Quantity = Convert.ToInt32(csv[2]);
+                        Quantity = csv[2].ToInt32();
                         if (csv.Length > 3)
                         {
                             Exchange = csv[3];
@@ -226,10 +227,10 @@ namespace QuantConnect.Data.Market
                     case SecurityType.Forex:
                         Symbol = config.Symbol;
                         TickType = TickType.Quote;
-                        Time = date.Date.AddMilliseconds(Convert.ToInt64(csv[0]));
+                        Time = date.Date.AddMilliseconds(csv[0].ToInt64());
                         BidPrice = csv[1].ToDecimal();
                         AskPrice = csv[2].ToDecimal();
-                        Value = BidPrice + (AskPrice - BidPrice) / 2;
+                        Value = (BidPrice + AskPrice) / 2;
                         break;
                 }
             }
@@ -279,10 +280,8 @@ namespace QuantConnect.Data.Market
             if (config.SecurityType == SecurityType.Forex)
             {
                 dataType = TickType.Quote;
-                dateFormat = "yyMMdd";
             }
 
-            string source;
             var symbol = string.IsNullOrEmpty(config.MappedSymbol) ? config.Symbol : config.MappedSymbol;
             var securityType = config.SecurityType.ToString().ToLower();
             var market = config.Market.ToLower();
@@ -290,9 +289,9 @@ namespace QuantConnect.Data.Market
             var file = date.ToString(dateFormat) + "_" + dataType.ToString().ToLower() + ".zip";
 
             //Add in the market for equities/cfd/forex for internationalization support.
-            source = Path.Combine(Constants.DataFolder, securityType, market, resolution, symbol.ToLower(), file);
+            var source = Path.Combine(Constants.DataFolder, securityType, market, resolution, symbol.ToLower(), file);
 
-            return new SubscriptionDataSource(source, SubscriptionTransportMedium.LocalFile);
+            return new SubscriptionDataSource(source, SubscriptionTransportMedium.LocalFile, FileFormat.Csv);
         }
 
 

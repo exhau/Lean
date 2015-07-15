@@ -102,6 +102,10 @@ namespace QuantConnect.Lean.Engine.DataFeeds
             _security = security;
             _increment = config.Increment;
             _queue = new ConcurrentQueue<BaseData>();
+            if (config.Resolution == Resolution.Tick)
+            {
+                throw new ArgumentException("StreamStores are only for non-tick subscriptions");
+            }
         }
 
         /// <summary>
@@ -113,13 +117,6 @@ namespace QuantConnect.Lean.Engine.DataFeeds
             // if we're not within the configured market hours don't process the data
             if (!_security.Exchange.IsOpenDuringBar(data.Time, data.EndTime, _config.ExtendedMarketHours))
             {
-                return;
-            }
-
-            if (_config.Resolution == Resolution.Tick)
-            {
-                // just keep pumping them directly in
-                _queue.Enqueue(data);
                 return;
             }
 
@@ -171,24 +168,14 @@ namespace QuantConnect.Lean.Engine.DataFeeds
             
             lock (_lock)
             {
-                switch (_type.Name)
+                if (_data == null)
                 {
-                    case "TradeBar":
-                        if (_data == null)
-                        {
-                            _data = new TradeBar(barStartTime, _config.Symbol, tick.LastPrice, tick.LastPrice, tick.LastPrice, tick.LastPrice, tick.Quantity, _config.Resolution.ToTimeSpan());
-                        }
-                        else
-                        {
-                            //Update the bar:
-                            _data.Update(tick.LastPrice, tick.Quantity, tick.BidPrice, tick.AskPrice);
-                        }
-                        break;
-
-                    //Each tick is a new data obj.
-                    case "Tick":
-                        _queue.Enqueue(tick);
-                        break;
+                    _data = new TradeBar(barStartTime, _config.Symbol, tick.LastPrice, tick.LastPrice, tick.LastPrice, tick.LastPrice, tick.Quantity, _config.Resolution.ToTimeSpan());
+                }
+                else
+                {
+                    //Update the bar:
+                    _data.Update(tick.LastPrice, tick.Quantity, tick.BidPrice, tick.AskPrice);
                 }
             }
         }
@@ -196,10 +183,11 @@ namespace QuantConnect.Lean.Engine.DataFeeds
         /// <summary>
         /// A time period has lapsed, trigger a save/queue of the current value of data.
         /// </summary>
-        /// <param name="triggerTime">The time we're triggering this archive for</param>
+        /// <param name="utcTriggerTime">The time we're triggering this archive for</param>
         /// <param name="fillForward">Data stream is a fillforward type</param>
-        public void TriggerArchive(DateTime triggerTime, bool fillForward)
+        public void TriggerArchive(DateTime utcTriggerTime, bool fillForward)
         {
+            var localTriggerTime = utcTriggerTime.ConvertTo(TimeZones.Utc, _config.TimeZone);
             lock (_lock)
             {
                 try
@@ -222,7 +210,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                     {
                         // the time is actually the end time of a bar, check to see if the start time
                         // is within market hours, which is really just checking the _previousData's EndTime
-                        if (!_security.Exchange.IsOpenDuringBar(triggerTime - _increment, triggerTime, _config.ExtendedMarketHours))
+                        if (!_security.Exchange.IsOpenDuringBar(localTriggerTime - _increment, localTriggerTime, _config.ExtendedMarketHours))
                         {
                             Log.Debug("StreamStore.TriggerArchive(): Exchange is closed: " + Symbol);
                             return;
@@ -250,7 +238,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
         private DateTime ComputeBarStartTime()
         {
             // for live data feeds compute a bar start time base on wall clock time, this prevents splitting of data into the algorithm
-            return DateTime.Now.RoundDown(_increment);
+            return DateTime.UtcNow.RoundDown(_increment).ConvertToUtc(_config.TimeZone);
         }
     }
 }

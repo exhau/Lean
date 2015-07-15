@@ -48,8 +48,7 @@ namespace QuantConnect.Securities
             if (order.Status == OrderStatus.Canceled) return fill;
 
             // make sure the exchange is open before filling
-            var currentBar = asset.GetLastData();
-            if (!asset.Exchange.IsOpenDuringBar(currentBar.Time, currentBar.EndTime, false)) return fill;
+            if (!IsExchangeOpen(asset)) return fill;
 
             try
             {
@@ -98,8 +97,7 @@ namespace QuantConnect.Securities
             var fill = new OrderEvent(order);
 
             // make sure the exchange is open before filling
-            var currentBar = asset.GetLastData();
-            if (!asset.Exchange.IsOpenDuringBar(currentBar.Time, currentBar.EndTime, false)) return fill;
+            if (!IsExchangeOpen(asset)) return fill;
 
             try
             {
@@ -319,17 +317,18 @@ namespace QuantConnect.Securities
                 // ASUR  | | |      [order]        | | | | | | |
                 //  SPY  | | | | | | | | | | | | | | | | | | | |
                 var currentBar = asset.GetLastData();
-                if (order.Time >= currentBar.EndTime) return fill;
+                var localOrderTime = order.Time.ConvertTo(TimeZones.Utc, asset.Exchange.TimeZone);
+                if (localOrderTime >= currentBar.EndTime) return fill;
 
                 // if the MOO was submitted during market the previous day, wait for a day to turn over
-                if (asset.Exchange.DateTimeIsOpen(order.Time) && order.Time.Date == asset.Time.Date)
+                if (asset.Exchange.DateTimeIsOpen(localOrderTime) && localOrderTime.Date == asset.LocalTime.Date)
                 {
                     return fill;
                 }
 
                 // wait until market open
                 // make sure the exchange is open before filling
-                if (!asset.Exchange.IsOpenDuringBar(currentBar.Time, currentBar.EndTime, false)) return fill;
+                if (!IsExchangeOpen(asset)) return fill;
 
                 order.Price = asset.Open;
                 order.Status = OrderStatus.Filled;
@@ -443,7 +442,8 @@ namespace QuantConnect.Securities
                 return 0m;
             }
 
-            return GetOrderFee(order.Quantity, order.Value/order.Quantity);
+            var price = order.Status.IsFill() ? order.Price : security.Price;
+            return GetOrderFee(order.Quantity, order.GetValue(price) / order.Quantity);
         }
 
         /// <summary>
@@ -467,6 +467,23 @@ namespace QuantConnect.Securities
                 minimumPrice = marketData.Value;
                 maximumPrice = marketData.Value;
             }
+        }
+
+        /// <summary>
+        /// Determines if the exchange is open using the current time of the asset
+        /// </summary>
+        private static bool IsExchangeOpen(Security asset)
+        {
+            if (!asset.Exchange.DateTimeIsOpen(asset.LocalTime))
+            {
+                // if we're not open at the current time exactly, check the bar size, this handle large sized bars (hours/days)
+                var currentBar = asset.GetLastData();
+                if (!asset.Exchange.IsOpenDuringBar(currentBar.Time, currentBar.EndTime, false))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         /// <summary>

@@ -101,7 +101,8 @@ namespace QuantConnect.Securities
         /// </summary>
         /// <param name="securities">The security manager</param>
         /// <param name="subscriptions">The subscription manager used for searching and adding subscriptions</param>
-        public void EnsureCurrencyDataFeed(SecurityManager securities, SubscriptionManager subscriptions)
+        /// <param name="exchangeHoursProvider">A security exchange hours provider instance used to resolve exchange hours for new subscriptions</param>
+        public void EnsureCurrencyDataFeed(SecurityManager securities, SubscriptionManager subscriptions, SecurityExchangeHoursProvider exchangeHoursProvider)
         {
             if (Symbol == CashBook.AccountCurrency)
             {
@@ -138,6 +139,11 @@ namespace QuantConnect.Securities
                 }
             }
 
+            // get the market from the first Forex subscription
+            string market = (from config in subscriptions.Subscriptions
+                             where config.SecurityType == SecurityType.Forex
+                             select config.Market).FirstOrDefault() ?? subscriptions.Subscriptions[0].Market;
+
             // if we've made it here we didn't find a subscription, so we'll need to add one
             var currencyPairs = Forex.Forex.CurrencyPairs;
             var minimumResolution = subscriptions.Subscriptions.Min(x => x.Resolution);
@@ -148,8 +154,9 @@ namespace QuantConnect.Securities
                 if (symbol == normal || symbol == invert)
                 {
                     _invertRealTimePrice = symbol == invert;
+                    var exchangeHours = exchangeHoursProvider.GetExchangeHours(market, symbol, SecurityType.Forex);
                     // set this as an internal feed so that the data doesn't get sent into the algorithm's OnData events
-                    _config = subscriptions.Add(objectType, SecurityType.Forex, symbol, minimumResolution, true, false, isTradeBar, isTradeBar, true);
+                    _config = subscriptions.Add(objectType, SecurityType.Forex, symbol, minimumResolution, market, exchangeHours.TimeZone, true, false, isTradeBar, isTradeBar, true);
                     var security = new Forex.Forex(this, _config, 1m, false);
                     securities.Add(symbol, security);
                     Log.Trace("Cash.EnsureCurrencyDataFeed(): Adding " + symbol + " for cash " + this.Symbol + " currency feed");

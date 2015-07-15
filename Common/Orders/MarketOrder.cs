@@ -50,9 +50,29 @@ namespace QuantConnect.Orders
         /// <param name="time">Time the order was placed</param>
         /// <param name="tag">User defined data tag for this order</param>
         public MarketOrder(string symbol, int quantity, DateTime time, string tag = "", SecurityType type = SecurityType.Base) :
-            base(symbol, quantity, OrderType.Market, time, 0, tag, type)
+            base(symbol, quantity, OrderType.Market, time, tag, type)
         {
         }
-    }
 
-} // End QC Namespace:
+        /// <summary>
+        /// Gets the value of this order at the given market price.
+        /// </summary>
+        /// <param name="currentMarketPrice">The current market price of the security</param>
+        /// <returns>The value of this order given the current market price</returns>
+        public override decimal GetValue(decimal currentMarketPrice)
+        {
+            return Quantity*currentMarketPrice;
+        }
+
+        /// <summary>
+        /// Creates a deep-copy clone of this order
+        /// </summary>
+        /// <returns>A copy of this order</returns>
+        public override Order Clone()
+        {
+            var order = new MarketOrder();
+            CopyTo(order);
+            return order;
+        }
+    }
+}

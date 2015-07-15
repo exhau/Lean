@@ -78,5 +78,46 @@ namespace QuantConnect.Tests.Common.Util
         private class Derived2 : Derived1
         {
         }
+
+        [Test]
+        public void ConvertsInt32FromString()
+        {
+            const string input = "12345678";
+            var value = input.ToInt32();
+            Assert.AreEqual(12345678, value);
+        }
+
+        [Test]
+        public void ConvertsInt64FromString()
+        {
+            const string input = "12345678900";
+            var value = input.ToInt64();
+            Assert.AreEqual(12345678900, value);
+        }
+
+        [Test]
+        public void ConvertsDecimalFromString()
+        {
+            const string input = "123.45678";
+            var value = input.ToDecimal();
+            Assert.AreEqual(123.45678m, value);
+        }
+
+        [Test]
+        public void ConvertsZeroDecimalFromString()
+        {
+            const string input = "0.45678";
+            var value = input.ToDecimal();
+            Assert.AreEqual(0.45678m, value);
+        }
+
+        [Test]
+        public void ConvertsOneNumberDecimalFromString()
+        {
+            const string input = "1.45678";
+            var value = input.ToDecimal();
+            Assert.AreEqual(1.45678m, value);
+        }
+
     }
 }

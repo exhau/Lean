@@ -102,7 +102,10 @@ namespace AmigoExcel
             var engine = new Engine(systemHandlers, algorithmHandlers, Config.GetBool("live-mode"));
             _leanEngineThread = new Thread(() =>
             {
-                engine.Run();
+                string algorithmPath;
+                var job = systemHandlers.JobQueue.NextJob(out algorithmPath);
+                engine.Run(job, algorithmPath);
+                systemHandlers.JobQueue.AcknowledgeJob(job);
             });
             _leanEngineThread.Start();
 
@@ -191,7 +194,8 @@ namespace AmigoExcel
         private void AlgoEnd()
         {
             _polling.Stop();
-            _engine.Dispose();
+            _engine.SystemHandlers.Dispose();
+            _engine.AlgorithmHandlers.Dispose();
 
             Composer.Instance.Reset();
             button_Start_BackTest.Enabled = true;

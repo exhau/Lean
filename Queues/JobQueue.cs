@@ -72,7 +72,8 @@ namespace QuantConnect.Queues
                     Channel = Config.Get("job-channel"),
                     UserId = Config.GetInt("job-user-id"),
                     Version = Constants.Version,
-                    DeployId = Config.Get("algorithm-type-name")
+                    DeployId = Config.Get("algorithm-type-name"),
+                    RamAllocation = int.MaxValue
                 };
 
                 try
@@ -95,7 +96,9 @@ namespace QuantConnect.Queues
                 Type = PacketType.BacktestNode,
                 Algorithm = File.ReadAllBytes(AlgorithmLocation),
                 Version = Constants.Version,
-                BacktestId = Config.Get("algorithm-type-name")
+                BacktestId = Config.Get("algorithm-type-name"),
+                RamAllocation = int.MaxValue,
+                Language = (Language)Enum.Parse(typeof(Language), Config.Get("algorithm-language"))
             };
 
             return backtestJob;
@@ -107,7 +110,9 @@ namespace QuantConnect.Queues
         /// <param name="job"></param>
         public void AcknowledgeJob(AlgorithmNodePacket job)
         {
-            //
+            // Make the console window pause so we can read log output before exiting and killing the application completely
+            Log.Trace("Engine.Main(): Analysis Complete. Press any key to continue.");
+            Console.Read();
         }
     }
 
