@@ -1,11 +1,13 @@
 ﻿using System;
-
+using System.Collections.Generic;
+using System.Globalization;
 using QuantConnect.Algorithm;
+using QuantConnect.Data;
 using QuantConnect.Data.Custom;
 using QuantConnect.Data.Market;
 using QuantConnect.Orders;
 
-namespace QuantConnect.Algorithm.Amigo
+namespace QuantConnect.Algorithm.CSharp.Amigo
 {
     public class SPArbitrageDaily : QCAlgorithm
     {
@@ -36,7 +38,7 @@ namespace QuantConnect.Algorithm.Amigo
         /// Data Event Handler: New data arrives here. "TradeBars" type is a dictionary of strings so you can access it by symbol.
         /// </summary>
         /// <param name="data">Data.</param>
-        public void OnData(Quandl data)
+        public void OnData(QuandlFuture data)
         {
             ExecutePair(DiscoverArbitrage(0.02));
         }
@@ -118,12 +120,53 @@ namespace QuantConnect.Algorithm.Amigo
     /// </summary>
     public class QuandlFuture : Quandl
     {
+        private bool _isInitialized;
+        private readonly List<string> _propertyNames = new List<string>();
+
+        public decimal Low;
+        public decimal High;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="QuantConnect.QuandlFuture"/> class.
         /// </summary>
         public QuandlFuture()
             : base(valueColumnName: "Settle")
         {
+        }
+
+        public override BaseData Reader(SubscriptionDataConfig config, string line, DateTime date, bool isLiveMode)
+        {
+            var data = new QuandlFuture {Symbol = config.Symbol};
+            var csv = line.Split(',');
+
+            if (!_isInitialized)
+            {
+                _isInitialized = true;
+                foreach (var propertyName in csv)
+                {
+                    var property = propertyName.TrimStart().TrimEnd();
+                    // should we remove property names like Time?
+                    // do we need to alias the Time??
+                    data.SetProperty(property, 0m);
+                    _propertyNames.Add(property);
+                }
+                return data;
+            }
+
+            data.Time = DateTime.ParseExact(csv[0], "yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+            for (var i = 1; i < csv.Length; i++)
+            {
+                var value = csv[i].ToDecimal();
+                data.SetProperty(_propertyNames[i], value);
+            }
+
+            // we know that there is a close property, we want to set that to 'Value'
+            data.Value = (decimal)data.GetProperty("Settle");
+            data.Low = (decimal)data.GetProperty("Low");
+            data.High = (decimal)data.GetProperty("High");
+
+            return data;
         }
     }
 }
